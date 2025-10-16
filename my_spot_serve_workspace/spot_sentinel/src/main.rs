@@ -2,7 +2,7 @@ use reqwest::{StatusCode,get};
 use serde::{Serialize, Deserialize}; 
 use std::time::Duration; 
 
-const METADATA_URL: &str = "https://169.254.169.254/latest/meta-data/spot/instance-action";
+const METADATA_URL: &str = "http://169.254.169.254/latest/meta-data/spot/instance-action";
 
 #[derive(Serialize, Deserialize, Debug)]
 struct InterruptNotice {
