@@ -1,4 +1,3 @@
-
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -7,7 +6,7 @@ const METADATA_URL: &str = "http://169.254.169.254/latest/meta-data/spot/instanc
 const TOKEN_URL: &str = "http://169.254.169.254/latest/api/token";
 
 #[derive(Serialize, Deserialize, Debug)]
-struct InterruptNotice {
+struct InterruptionNotice {
     action: String,
     time: String,
 }
@@ -54,11 +53,12 @@ async fn check_for_notice() -> Result<(), reqwest::Error> {
     match response.status() {
         StatusCode::OK => {
             println!("Interruption Notice Found");
-            let notice = response.json::<InterruptNotice>().await?;
-            println!("Notice Details:{:?}", notice);
+            let notice = response.json::<InterruptionNotice>().await?;
+            println!("Interruption Notice Found: Action: {}, Time: {}", notice.action, notice.time);
+
         }
         StatusCode::NOT_FOUND => {
-            println!("No InterruptNotice");
+            println!("No InterruptionNotice");
         }
         other => {
             println!("Unexpected Status Code, {other}");
