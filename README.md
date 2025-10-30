@@ -1,7 +1,3 @@
 # GPU pooling algorithm
-
-Use Type state pattern
-Node<State> {
-
-}
+Use Spot Instances for ML inference
 
