@@ -7,7 +7,7 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 
 # Copy all workspace members
-COPY spot_sentinel ./spot_sentinel
+COPY ./ ./spot_sentinel
 
 # Build the specific package
 RUN cargo build --release --package spot_sentinel

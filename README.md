@@ -6,4 +6,4 @@ Myelin is a decentralized protocol for orchestrating and abstracting compute ove
 
 Author
   
-Myelin is being developed by Your Name (https://github.com/your-username).
+Myelin is being developed by Your Name (https://github.com/bobby-math). 

@@ -1,6 +1,0 @@
-[workspace] 
-members = ["spot_sentinel",
-]
-
-resolver = "3"
-

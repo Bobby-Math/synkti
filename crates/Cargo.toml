@@ -1,0 +1,23 @@
+[workspace]
+members = [
+
+"core/myelin-core",
+
+"logic/myelin-scheduler",
+"logic/myelin-greedy-scheduler", # Example alternative scheduler
+
+"interfaces/cloud/cloud-traits",
+"interfaces/cloud/aws-provider",
+"interfaces/cloud/gcp-provider", # Example alternative cloud provider
+"interfaces/compute/compute-traits",
+"interfaces/compute/myelin-kernels",
+"interfaces/compute/rust-kernels", # Example alternative compute backend
+
+"nodes/myelin-worker",
+"nodes/spot-sentinel",
+
+"applications/myelin-simulation-engine",
+"applications/myelin-visualizer",
+"applications/myelin-orchestrator", # Future production server
+
+]
