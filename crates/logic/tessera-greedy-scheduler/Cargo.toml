@@ -1,5 +1,5 @@
 [package]
-name = "myelin-scheduler"
+name = "tessera-greedy-scheduler"
 version = "0.1.0"
 edition = "2024"
 

@@ -1,23 +1,35 @@
 [workspace]
+resolver = "3"
 members = [
 
-"core/myelin-core",
+"core/tessera-core",
 
-"logic/myelin-scheduler",
-"logic/myelin-greedy-scheduler", # Example alternative scheduler
+"logic/tessera-scheduler",
+"logic/tessera-greedy-scheduler", # Example alternative scheduler
+
+"executors/tessera-ml-executor", # ML inference executor (uses axon + synapse)
 
 "interfaces/cloud/cloud-traits",
 "interfaces/cloud/aws-provider",
 "interfaces/cloud/gcp-provider", # Example alternative cloud provider
 "interfaces/compute/compute-traits",
-"interfaces/compute/myelin-kernels",
 "interfaces/compute/rust-kernels", # Example alternative compute backend
 
-"nodes/myelin-worker",
+"nodes/tessera-worker",
 "nodes/spot-sentinel",
 
-"applications/myelin-simulation-engine",
-"applications/myelin-visualizer",
-"applications/myelin-orchestrator", # Future production server
+"applications/tessera-simulation-engine",
+"applications/tessera-visualizer",
+"applications/tessera-orchestrator", # Future production server
 
 ]
+
+[workspace.dependencies]
+# External consulting portfolio libraries (public SSPL, separate repos)
+synapse = { path = "../../synapse" }
+axon = { path = "../../axon" }
+
+# Common workspace dependencies
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+tracing = "0.1"
