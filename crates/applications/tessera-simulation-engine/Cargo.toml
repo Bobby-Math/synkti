@@ -19,6 +19,9 @@ rand_distr = "0.4"
 # CLI argument parsing
 clap = { version = "4.4", features = ["derive"] }
 
+# Optimal assignment algorithm (Kuhn-Munkres)
+pathfinding = "4.0"
+
 # Async runtime (optional, for future use)
 tokio = { workspace = true, optional = true }
 

@@ -8,6 +8,7 @@ use std::cmp::Ordering;
 
 use crate::types::{Event, Instance, InstanceState, InstanceType, Task, SpotPrice};
 use crate::policies::SchedulingPolicy;
+use crate::migration::MigrationPlanner;
 
 use serde::{Deserialize, Serialize};
 
@@ -322,29 +323,88 @@ impl Simulator {
             self.total_preemptions += 1;
 
             // Find all tasks on this instance and reschedule them
-            let affected_tasks: Vec<u64> = self.tasks
+            let affected_task_ids: Vec<u64> = self.tasks
                 .iter()
                 .filter(|(_, t)| t.assigned_instance == Some(instance_id) && !t.is_completed())
                 .map(|(id, _)| *id)
                 .collect();
 
-            for task_id in affected_tasks {
-                if let Some(task) = self.tasks.get_mut(&task_id) {
-                    // Update task state
+            // Update task state for all affected tasks
+            for task_id in &affected_task_ids {
+                if let Some(task) = self.tasks.get_mut(task_id) {
                     task.preemption_count += 1;
                     task.assigned_instance = None;
 
                     // Notify policy
                     self.policy.handle_preemption(task, instance);
-
-                    // Add back to pending queue
-                    self.pending_tasks.push(task_id);
                 }
             }
 
-            // Try to reassign affected tasks
-            self.assign_pending_tasks();
+            // Use optimal migration planning (Kuhn-Munkres algorithm)
+            self.migrate_tasks_optimally(&affected_task_ids);
         }
+    }
+
+    /// Migrate tasks using optimal assignment (Kuhn-Munkres algorithm)
+    fn migrate_tasks_optimally(&mut self, displaced_task_ids: &[u64]) {
+        if displaced_task_ids.is_empty() {
+            return;
+        }
+
+        // Collect displaced tasks
+        let displaced_tasks: Vec<Task> = displaced_task_ids
+            .iter()
+            .filter_map(|id| self.tasks.get(id).cloned())
+            .collect();
+
+        // Collect available running instances
+        let available_instances: Vec<Instance> = self.instances
+            .values()
+            .filter(|inst| inst.state == InstanceState::Running)
+            .cloned()
+            .collect();
+
+        // Find optimal migration assignment
+        let migration_plan = MigrationPlanner::plan_optimal_migration(
+            &displaced_tasks,
+            &available_instances
+        );
+
+        // Apply the migration plan
+        let mut assigned_task_ids = Vec::new();
+        for (task_id, instance_id) in migration_plan {
+            if let Some(task) = self.tasks.get_mut(&task_id) {
+                if let Some(instance) = self.instances.get_mut(&instance_id) {
+                    if instance.assign_task(task) {
+                        task.assigned_instance = Some(instance_id);
+                        task.start_time = Some(self.current_time);
+
+                        // Schedule completion event
+                        let completion_time = self.current_time + task.remaining_time;
+                        self.event_queue.push(TimedEvent {
+                            time: completion_time,
+                            event: Event::TaskCompletion {
+                                task_id,
+                                time: completion_time,
+                            },
+                        });
+
+                        assigned_task_ids.push(task_id);
+                    }
+                }
+            }
+        }
+
+        // Tasks that couldn't be assigned optimally need new instances
+        for task_id in displaced_task_ids {
+            if !assigned_task_ids.contains(task_id) {
+                // Add to pending queue for instance launch
+                self.pending_tasks.push(*task_id);
+            }
+        }
+
+        // Launch instances for unassigned tasks
+        self.assign_pending_tasks();
     }
 
     /// Get spot price at a specific time
