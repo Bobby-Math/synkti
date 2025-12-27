@@ -148,14 +148,9 @@ mod tests {
         assert_eq!(t1, InstanceType::Spot);
 
         // Simulate preemption
-        let instance = Instance {
-            id: 1,
-            instance_type: InstanceType::Spot,
-            state: InstanceState::Preempted,
-            hourly_cost: 0.30,
-            start_time: 0.0,
-            end_time: Some(5.0),
-        };
+        let mut instance = Instance::new(1, InstanceType::Spot, 0.30, 0.0);
+        instance.state = InstanceState::Preempted;
+        instance.end_time = Some(5.0);
         policy.handle_preemption(&mut task, &instance);
 
         // Second attempt: still spot (threshold = 2)
