@@ -5,7 +5,7 @@
 pub mod types;
 pub mod spot_data;
 pub mod policies;
+pub mod simulator;
 
 // Future modules (not yet implemented)
-// pub mod simulator;
 // pub mod metrics;
