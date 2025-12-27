@@ -19,6 +19,10 @@ rand_distr = "0.4"
 # Async runtime (optional, for future use)
 tokio = { workspace = true, optional = true }
 
+[dev-dependencies]
+# Visualization for examples
+plotly = "0.9"
+
 [features]
 default = []
 async = ["tokio"]
