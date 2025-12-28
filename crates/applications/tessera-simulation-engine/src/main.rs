@@ -127,12 +127,21 @@ fn main() {
     println!("║  Simulation Results                                      ║");
     println!("╚══════════════════════════════════════════════════════════╝\n");
 
-    println!("{:<20} {:>12} {:>12} {:>12} {:>12} {:>12}",
-        "Policy", "Cost ($)", "Completed", "Preemptions", "Avg Time", "P99 Time");
-    println!("{}", "-".repeat(92));
+    println!("{:<20} {:>12} {:>12} {:>12} {:>12} {:>12} {:>15}",
+        "Policy", "Cost ($)", "Completed", "Preemptions", "Avg Time", "P99 Time", "Checkpoints");
+    println!("{}", "-".repeat(107));
 
     for result in &results {
-        println!("{:<20} {:>12.2} {:>10}/{:<2} {:>12} {:>12.2} {:>12.2}",
+        let checkpoint_info = if result.checkpoints_attempted > 0 {
+            format!("{}/{} ({:.1}h saved)",
+                result.checkpoints_successful,
+                result.checkpoints_attempted,
+                result.total_time_saved_hours)
+        } else {
+            "N/A".to_string()
+        };
+
+        println!("{:<20} {:>12.2} {:>10}/{:<2} {:>12} {:>12.2} {:>12.2} {:>15}",
             result.policy_name,
             result.total_cost,
             result.completed_tasks,
@@ -140,6 +149,7 @@ fn main() {
             result.total_preemptions,
             result.average_completion_time,
             result.p99_completion_time,
+            checkpoint_info,
         );
     }
 
@@ -150,7 +160,7 @@ fn main() {
             .or_else(|| results.iter().max_by(|a, b| a.total_cost.partial_cmp(&b.total_cost).unwrap()))
             .unwrap();
 
-        println!("\n{}", "-".repeat(92));
+        println!("\n{}", "-".repeat(107));
         println!("Cost Savings vs {} baseline:", baseline.policy_name);
 
         for result in &results {

@@ -9,6 +9,7 @@ use std::cmp::Ordering;
 use crate::types::{Event, Instance, InstanceState, InstanceType, Task, SpotPrice};
 use crate::policies::SchedulingPolicy;
 use crate::migration::MigrationPlanner;
+use crate::checkpoint::CheckpointPlanner;
 
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +23,9 @@ pub struct SimulationResult {
     pub total_preemptions: usize,
     pub average_completion_time: f64,
     pub p99_completion_time: f64,
+    pub checkpoints_attempted: usize,
+    pub checkpoints_successful: usize,
+    pub total_time_saved_hours: f64,
 }
 
 /// Timed event wrapper for priority queue ordering
@@ -73,6 +77,9 @@ pub struct Simulator {
     total_cost: f64,
     total_preemptions: usize,
     completed_tasks: Vec<u64>,
+    checkpoints_attempted: usize,
+    checkpoints_successful: usize,
+    total_time_saved_hours: f64,
 }
 
 impl Simulator {
@@ -95,6 +102,9 @@ impl Simulator {
             total_cost: 0.0,
             total_preemptions: 0,
             completed_tasks: Vec::new(),
+            checkpoints_attempted: 0,
+            checkpoints_successful: 0,
+            total_time_saved_hours: 0.0,
         }
     }
 
@@ -310,17 +320,12 @@ impl Simulator {
 
     /// Handle instance preemption
     fn handle_preemption(&mut self, instance_id: u64) {
-        if let Some(instance) = self.instances.get_mut(&instance_id) {
+        if let Some(instance) = self.instances.get(&instance_id).cloned() {
             // Only preempt if it's a running spot instance
             if instance.instance_type != InstanceType::Spot
                 || instance.state != InstanceState::Running {
                 return;
             }
-
-            instance.state = InstanceState::Preempted;
-            instance.end_time = Some(self.current_time);
-
-            self.total_preemptions += 1;
 
             // Find all tasks on this instance and reschedule them
             let affected_task_ids: Vec<u64> = self.tasks
@@ -329,6 +334,36 @@ impl Simulator {
                 .map(|(id, _)| *id)
                 .collect();
 
+            // Plan and execute checkpoints for all affected tasks
+            for task_id in &affected_task_ids {
+                if let Some(task) = self.tasks.get_mut(task_id) {
+                    self.checkpoints_attempted += 1;
+
+                    // Plan checkpoint based on grace period
+                    let checkpoint_decision = CheckpointPlanner::plan_checkpoint(task, &instance);
+
+                    // Execute checkpoint
+                    CheckpointPlanner::execute_checkpoint(task, &checkpoint_decision, self.current_time);
+
+                    // Track success
+                    match checkpoint_decision {
+                        crate::checkpoint::CheckpointDecision::FullCheckpoint { .. }
+                        | crate::checkpoint::CheckpointDecision::PartialCheckpoint { .. } => {
+                            self.checkpoints_successful += 1;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            // Now update instance state
+            if let Some(instance) = self.instances.get_mut(&instance_id) {
+                instance.state = InstanceState::Preempted;
+                instance.end_time = Some(self.current_time);
+            }
+
+            self.total_preemptions += 1;
+
             // Update task state for all affected tasks
             for task_id in &affected_task_ids {
                 if let Some(task) = self.tasks.get_mut(task_id) {
@@ -336,7 +371,9 @@ impl Simulator {
                     task.assigned_instance = None;
 
                     // Notify policy
-                    self.policy.handle_preemption(task, instance);
+                    if let Some(instance) = self.instances.get(&instance_id) {
+                        self.policy.handle_preemption(task, instance);
+                    }
                 }
             }
 
@@ -375,11 +412,15 @@ impl Simulator {
         for (task_id, instance_id) in migration_plan {
             if let Some(task) = self.tasks.get_mut(&task_id) {
                 if let Some(instance) = self.instances.get_mut(&instance_id) {
+                    // Apply checkpoint recovery if available
+                    let time_saved = CheckpointPlanner::apply_checkpoint_recovery(task);
+                    self.total_time_saved_hours += time_saved;
+
                     if instance.assign_task(task) {
                         task.assigned_instance = Some(instance_id);
                         task.start_time = Some(self.current_time);
 
-                        // Schedule completion event
+                        // Schedule completion event (accounting for checkpoint recovery)
                         let completion_time = self.current_time + task.remaining_time;
                         self.event_queue.push(TimedEvent {
                             time: completion_time,
@@ -465,6 +506,9 @@ impl Simulator {
             total_preemptions: self.total_preemptions,
             average_completion_time,
             p99_completion_time,
+            checkpoints_attempted: self.checkpoints_attempted,
+            checkpoints_successful: self.checkpoints_successful,
+            total_time_saved_hours: self.total_time_saved_hours,
         }
     }
 }
