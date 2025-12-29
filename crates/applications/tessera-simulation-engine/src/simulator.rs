@@ -69,6 +69,7 @@ pub struct Simulator {
 
     // Configuration
     on_demand_price: f64,
+    use_optimal_migration: bool, // If true, use KM algorithm; if false, use naive greedy
 
     // ID generators
     next_instance_id: u64,
@@ -88,6 +89,7 @@ impl Simulator {
         policy: Box<dyn SchedulingPolicy>,
         spot_prices: Vec<SpotPrice>,
         on_demand_price: f64,
+        use_optimal_migration: bool,
     ) -> Self {
         Simulator {
             current_time: 0.0,
@@ -98,6 +100,7 @@ impl Simulator {
             policy,
             spot_prices,
             on_demand_price,
+            use_optimal_migration,
             next_instance_id: 0,
             total_cost: 0.0,
             total_preemptions: 0,
@@ -382,7 +385,7 @@ impl Simulator {
         }
     }
 
-    /// Migrate tasks using optimal assignment (Kuhn-Munkres algorithm)
+    /// Migrate tasks using configured migration strategy (optimal KM or naive greedy)
     fn migrate_tasks_optimally(&mut self, displaced_task_ids: &[u64]) {
         if displaced_task_ids.is_empty() {
             return;
@@ -401,11 +404,18 @@ impl Simulator {
             .cloned()
             .collect();
 
-        // Find optimal migration assignment
-        let migration_plan = MigrationPlanner::plan_optimal_migration(
-            &displaced_tasks,
-            &available_instances
-        );
+        // Choose migration strategy based on configuration
+        let migration_plan = if self.use_optimal_migration {
+            MigrationPlanner::plan_optimal_migration(
+                &displaced_tasks,
+                &available_instances
+            )
+        } else {
+            MigrationPlanner::plan_naive_migration(
+                &displaced_tasks,
+                &available_instances
+            )
+        };
 
         // Apply the migration plan
         let mut assigned_task_ids = Vec::new();
@@ -498,8 +508,12 @@ impl Simulator {
             0.0
         };
 
+        // Append migration strategy to policy name for clarity
+        let migration_suffix = if self.use_optimal_migration { "-Optimal" } else { "-Naive" };
+        let full_policy_name = format!("{}{}", self.policy.name(), migration_suffix);
+
         SimulationResult {
-            policy_name: self.policy.name().to_string(),
+            policy_name: full_policy_name,
             total_cost: self.total_cost,
             total_tasks,
             completed_tasks,
@@ -524,7 +538,7 @@ mod tests {
         let policy = Box::new(GreedyPolicy::new());
         let spot_prices = SpotPriceGenerator::generate_simple(10.0, 0.30, 0.05);
 
-        let simulator = Simulator::new(policy, spot_prices, 1.00);
+        let simulator = Simulator::new(policy, spot_prices, 1.00, true);
 
         assert_eq!(simulator.current_time, 0.0);
         assert_eq!(simulator.total_cost, 0.0);
@@ -536,7 +550,7 @@ mod tests {
         let policy = Box::new(OnDemandOnlyPolicy::new());
         let spot_prices = SpotPriceGenerator::generate_simple(10.0, 0.30, 0.05);
 
-        let mut simulator = Simulator::new(policy, spot_prices, 1.00);
+        let mut simulator = Simulator::new(policy, spot_prices, 1.00, true);
 
         // Add a simple task
         let task = Task::new(1, 0.0, 1.0);  // 1 hour duration

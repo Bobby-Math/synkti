@@ -94,7 +94,18 @@ fn main() {
     for policy_name in &policy_names {
         print!("Running simulation with {} policy... ", policy_name);
 
-        let policy_box: Box<dyn tessera_simulation_engine::policies::SchedulingPolicy> = match *policy_name {
+        // Parse policy name and migration strategy
+        // Supports: "greedy", "greedy-naive", "greedy-optimal", etc.
+        let (base_policy, use_optimal) = if policy_name.ends_with("-naive") {
+            (policy_name.trim_end_matches("-naive"), false)
+        } else if policy_name.ends_with("-optimal") {
+            (policy_name.trim_end_matches("-optimal"), true)
+        } else {
+            // Default: use optimal for backwards compatibility
+            (*policy_name, true)
+        };
+
+        let policy_box: Box<dyn tessera_simulation_engine::policies::SchedulingPolicy> = match base_policy {
             "greedy" => Box::new(GreedyPolicy::new()),
             "fallback" => Box::new(OnDemandFallbackPolicy::new(2)), // Fallback after 2 preemptions
             "ondemand" => Box::new(OnDemandOnlyPolicy::new()),
@@ -108,6 +119,7 @@ fn main() {
             policy_box,
             spot_prices.clone(),
             args.on_demand_price,
+            use_optimal,
         );
 
         // Add all tasks

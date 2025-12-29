@@ -140,6 +140,66 @@ impl MigrationPlanner {
         migration_plan
     }
 
+    /// Plan naive greedy migration (baseline for comparison)
+    ///
+    /// Uses simple first-fit algorithm: for each task, assign to first instance with enough memory.
+    /// This is the baseline strategy that optimal KM migration improves upon.
+    ///
+    /// # Arguments
+    /// - `displaced_tasks`: Tasks that need to be migrated
+    /// - `available_instances`: Instances that can receive tasks
+    ///
+    /// # Returns
+    /// HashMap mapping task_id -> instance_id for naive assignment
+    ///
+    /// # Algorithm
+    /// 1. For each task, iterate through instances in order
+    /// 2. Assign to first instance that has enough memory
+    /// 3. Track memory usage to prevent over-allocation
+    ///
+    /// # Notes
+    /// - Much simpler than KM algorithm, but suboptimal
+    /// - Does not minimize transfer time, just finds first feasible assignment
+    pub fn plan_naive_migration(
+        displaced_tasks: &[Task],
+        available_instances: &[Instance],
+    ) -> HashMap<u64, u64> {
+        if displaced_tasks.is_empty() || available_instances.is_empty() {
+            return HashMap::new();
+        }
+
+        let mut assignment = HashMap::new();
+
+        // Track memory usage per instance (instance_id -> used_memory_mb)
+        let mut instance_memory_used: HashMap<u64, f64> = available_instances
+            .iter()
+            .map(|inst| (inst.id, inst.gpu_memory_used_mb))
+            .collect();
+
+        // For each task, find first instance that can fit it
+        for task in displaced_tasks {
+            for instance in available_instances {
+                let current_used = instance_memory_used.get(&instance.id).unwrap_or(&0.0);
+                let available = (instance.gpu_memory_gb * 1024.0) - current_used;
+
+                // Check if task fits in available memory
+                if task.can_fit_in_memory(available) {
+                    // Assign task to this instance
+                    assignment.insert(task.id, instance.id);
+
+                    // Update memory usage tracking
+                    *instance_memory_used.get_mut(&instance.id).unwrap() += task.kv_cache_size_mb;
+
+                    // Move to next task
+                    break;
+                }
+            }
+            // If no instance found, task remains unassigned
+        }
+
+        assignment
+    }
+
     /// Calculate total migration cost for a given assignment
     ///
     /// Useful for comparing greedy vs optimal strategies
@@ -291,5 +351,93 @@ mod tests {
             (total_cost - 2.4).abs() < 0.01,
             "Total cost should be ~2.4 seconds"
         );
+    }
+
+    #[test]
+    fn test_naive_migration_simple() {
+        let task1 = Task::new(1, 0.0, 5.0); // 1 GB cache
+        let task2 = Task::new(2, 0.0, 10.0); // 2 GB cache
+
+        let instance1 = Instance::new(100, InstanceType::Spot, 0.30, 0.0);
+        let instance2 = Instance::new(101, InstanceType::Spot, 0.30, 0.0);
+
+        let tasks = vec![task1, task2];
+        let instances = vec![instance1, instance2];
+
+        let assignment = MigrationPlanner::plan_naive_migration(&tasks, &instances);
+
+        // Should assign both tasks
+        assert_eq!(assignment.len(), 2, "Should assign both tasks");
+        assert!(assignment.contains_key(&1), "Task 1 should be assigned");
+        assert!(assignment.contains_key(&2), "Task 2 should be assigned");
+    }
+
+    #[test]
+    fn test_naive_migration_memory_constraint() {
+        // Create tasks that together exceed one instance's memory
+        let task1 = Task::new(1, 0.0, 50.0); // ~10 GB cache
+        let task2 = Task::new(2, 0.0, 50.0); // ~10 GB cache
+        let task3 = Task::new(3, 0.0, 50.0); // ~10 GB cache
+
+        let instance1 = Instance::new(100, InstanceType::Spot, 0.30, 0.0); // 24 GB GPU
+        let instance2 = Instance::new(101, InstanceType::Spot, 0.30, 0.0); // 24 GB GPU
+
+        let tasks = vec![task1, task2, task3];
+        let instances = vec![instance1, instance2];
+
+        let assignment = MigrationPlanner::plan_naive_migration(&tasks, &instances);
+
+        // Should assign all 3 tasks (2 on first instance, 1 on second)
+        assert_eq!(assignment.len(), 3, "Should assign all 3 tasks");
+    }
+
+    #[test]
+    fn test_naive_vs_optimal_comparison() {
+        // Create scenario where optimal is better than naive
+        // 2 tasks with different sizes, 2 instances with same bandwidth
+        let task1 = Task::new(1, 0.0, 5.0); // Small: 1 GB cache
+        let task2 = Task::new(2, 0.0, 40.0); // Large: 8 GB cache
+
+        let instance1 = Instance::new(100, InstanceType::Spot, 0.30, 0.0);
+        let instance2 = Instance::new(101, InstanceType::Spot, 0.30, 0.0);
+
+        let tasks = vec![task1.clone(), task2.clone()];
+        let instances = vec![instance1.clone(), instance2.clone()];
+
+        // Naive: assigns in order (task1->inst1, task2->inst2)
+        let naive_assignment = MigrationPlanner::plan_naive_migration(&tasks, &instances);
+
+        // Optimal: KM finds best assignment
+        let optimal_assignment = MigrationPlanner::plan_optimal_migration(&tasks, &instances);
+
+        // Both should assign both tasks
+        assert_eq!(naive_assignment.len(), 2, "Naive should assign both");
+        assert_eq!(optimal_assignment.len(), 2, "Optimal should assign both");
+
+        // Calculate costs
+        let naive_cost = MigrationPlanner::calculate_total_cost(&tasks, &instances, &naive_assignment);
+        let optimal_cost = MigrationPlanner::calculate_total_cost(&tasks, &instances, &optimal_assignment);
+
+        // In this symmetric case, costs should be equal (both instances identical)
+        // But we're testing that the functions work correctly
+        assert!(naive_cost > 0.0, "Naive cost should be positive");
+        assert!(optimal_cost > 0.0, "Optimal cost should be positive");
+        assert!(
+            (naive_cost - optimal_cost).abs() < 0.1,
+            "With identical instances, costs should be similar"
+        );
+    }
+
+    #[test]
+    fn test_naive_migration_empty_inputs() {
+        let tasks = vec![];
+        let instances = vec![Instance::new(100, InstanceType::Spot, 0.30, 0.0)];
+        let assignment = MigrationPlanner::plan_naive_migration(&tasks, &instances);
+        assert!(assignment.is_empty());
+
+        let tasks = vec![Task::new(1, 0.0, 10.0)];
+        let instances = vec![];
+        let assignment = MigrationPlanner::plan_naive_migration(&tasks, &instances);
+        assert!(assignment.is_empty());
     }
 }
