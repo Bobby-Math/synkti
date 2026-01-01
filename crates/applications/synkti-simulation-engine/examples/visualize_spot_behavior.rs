@@ -15,7 +15,7 @@ use plotly::{
     layout::{Axis, Layout},
     Plot, Scatter,
 };
-use tessera_simulation_engine::spot_data::SpotPriceGenerator;
+use synkti_simulation_engine::spot_data::SpotPriceGenerator;
 
 fn main() {
     println!("🎨 Generating spot instance behavior visualization...");
@@ -122,7 +122,7 @@ fn main() {
     plot.set_layout(layout);
 
     // Save to HTML
-    let output_path = "applications/tessera-simulation-engine/visualizations/spot_behavior.html";
+    let output_path = "applications/synkti-simulation-engine/visualizations/spot_behavior.html";
     plot.write_html(output_path);
 
     println!("✅ Visualization saved to {}", output_path);

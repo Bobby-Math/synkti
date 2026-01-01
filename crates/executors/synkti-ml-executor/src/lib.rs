@@ -1,9 +1,9 @@
-//! # Tessera ML Executor
+//! # Synkti ML Executor
 //!
-//! ML inference executor implementation for Tessera.
+//! ML inference executor implementation for Synkti.
 //!
 //! This executor uses Axon (ML inference server) and Synapse (CUDA FFI)
-//! to provide high-performance ML inference as a Tessera workload.
+//! to provide high-performance ML inference as a Synkti workload.
 
 #![warn(missing_docs)]
 
@@ -27,7 +27,7 @@ impl Default for MlInferenceExecutor {
     }
 }
 
-// Note: TaskExecutor trait implementation will be added once tessera-core defines it
+// Note: TaskExecutor trait implementation will be added once synkti-core defines it
 
 #[cfg(test)]
 mod tests {

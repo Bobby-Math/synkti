@@ -1,10 +1,10 @@
 [package]
-name = "tessera-simulation-engine"
+name = "synkti-simulation-engine"
 version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "tessera-sim"
+name = "synkti-sim"
 path = "src/main.rs"
 
 [dependencies]

@@ -1,10 +1,10 @@
 [package]
-name = "tessera-ml-executor"
+name = "synkti-ml-executor"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-tessera-core = { path = "../../core/tessera-core" }
+synkti-core = { path = "../../core/synkti-core" }
 synapse = { path = "../../../../synapse" }
 axon = { path = "../../../../axon" }
 tokio = "1.0"

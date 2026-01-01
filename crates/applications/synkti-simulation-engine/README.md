@@ -1,4 +1,4 @@
-# Tessera Simulation Engine
+# Synkti Simulation Engine
 
 **Status:** ✅ Phase 1 Complete - Grant-Ready Prototype
 
@@ -12,16 +12,16 @@ Discrete-event simulator for spot instance orchestration with **optimal migratio
 cd /home/bobby/spot/tessera/crates
 
 # Run simulation comparing 3 policies
-cargo run --release -p tessera-simulation-engine -- --duration 48 --tasks 100
+cargo run --release -p synkti-simulation-engine -- --duration 48 --tasks 100
 
 # Export results to JSON
-cargo run --release -p tessera-simulation-engine -- --duration 48 --output results.json
+cargo run --release -p synkti-simulation-engine -- --duration 48 --output results.json
 
 # Run specific policy
-cargo run --release -p tessera-simulation-engine -- --policies greedy
+cargo run --release -p synkti-simulation-engine -- --policies greedy
 
 # Run all tests (28 passing)
-cargo test -p tessera-simulation-engine
+cargo test -p synkti-simulation-engine
 ```
 
 ---
@@ -97,7 +97,7 @@ Discrete-Event Simulator (simulator.rs - Priority queue event loop)
 **Innovation:** Dynamic re-parallelization during preemption
 **Limitation:** Greedy migration, LLM-specific, no grace period exploitation
 
-**Tessera Improvement:**
+**Synkti Improvement:**
 - Optimal migration (provably better than greedy)
 - Domain-agnostic (works for any GPU workload)
 - Grace period checkpointing (novel contribution)
@@ -109,7 +109,7 @@ Discrete-Event Simulator (simulator.rs - Priority queue event loop)
 **Innovation:** Global replica placement across clouds/regions
 **Limitation:** No intra-replica healing, coarse-grained failover
 
-**Tessera Improvement:**
+**Synkti Improvement:**
 - Fine-grained migration within region
 - Checkpoint recovery for faster resume
 - Combines global (SkyServe-style) + local (SpotServe-style) orchestration
@@ -121,7 +121,7 @@ Discrete-Event Simulator (simulator.rs - Priority queue event loop)
 **Innovation:** Uniform Progress policy for deadline-aware scheduling
 **Limitation:** No interactive workload support, no GPU orchestration
 
-**Tessera Improvement:**
+**Synkti Improvement:**
 - Supports both batch and interactive workloads
 - GPU memory constraints enforced
 - Checkpoint model for partial progress recovery
@@ -166,7 +166,7 @@ To demonstrate the value of the Kuhn-Munkres algorithm, we compare it against a 
 **How to Run:**
 ```bash
 # Compare all policy variants
-cargo run --release -p tessera-simulation-engine -- \
+cargo run --release -p synkti-simulation-engine -- \
   --duration 72 --tasks 200 \
   --policies greedy-naive,greedy-optimal,fallback-naive,fallback-optimal,ondemand
 ```
@@ -183,18 +183,18 @@ cargo run --release -p tessera-simulation-engine -- \
 ### Build Instructions
 ```bash
 cd /home/bobby/spot/tessera/crates
-cargo build --release -p tessera-simulation-engine
+cargo build --release -p synkti-simulation-engine
 ```
 
 ### Run Tests
 ```bash
-cargo test -p tessera-simulation-engine
+cargo test -p synkti-simulation-engine
 # Expected: 32 tests passing (100% pass rate)
 ```
 
 ### Run Example Simulation
 ```bash
-cargo run --release -p tessera-simulation-engine -- --duration 48 --tasks 100
+cargo run --release -p synkti-simulation-engine -- --duration 48 --tasks 100
 ```
 
 **Expected Output:**
@@ -292,7 +292,7 @@ plotly = "0.9"  # For visualization examples
 
 ## Contact
 
-**Project:** Tessera (Domain-agnostic spot instance orchestration)
+**Project:** Synkti (Domain-agnostic spot instance orchestration)
 **Phase:** Grant preparation (Q4 2025)
 **Timeline:** Prototype complete, applying for funding January 2026
 

@@ -1,4 +1,4 @@
-//! Tessera Simulation Engine CLI
+//! Synkti Simulation Engine CLI
 //!
 //! Command-line interface for running spot instance orchestration simulations
 
@@ -6,7 +6,7 @@ use clap::Parser;
 use serde_json;
 use std::fs;
 
-use tessera_simulation_engine::{
+use synkti_simulation_engine::{
     policies::{GreedyPolicy, OnDemandFallbackPolicy, OnDemandOnlyPolicy},
     simulator::Simulator,
     spot_data::SpotPriceGenerator,
@@ -14,7 +14,7 @@ use tessera_simulation_engine::{
 };
 
 #[derive(Parser, Debug)]
-#[command(name = "tessera-sim")]
+#[command(name = "synkti-sim")]
 #[command(about = "Simulate spot instance orchestration policies", long_about = None)]
 struct Args {
     /// Simulation duration in hours
@@ -50,7 +50,7 @@ fn main() {
     let args = Args::parse();
 
     println!("╔══════════════════════════════════════════════════════════╗");
-    println!("║  Tessera Simulation Engine                               ║");
+    println!("║  Synkti Simulation Engine                                ║");
     println!("╚══════════════════════════════════════════════════════════╝\n");
 
     println!("Configuration:");
@@ -105,7 +105,7 @@ fn main() {
             (*policy_name, true)
         };
 
-        let policy_box: Box<dyn tessera_simulation_engine::policies::SchedulingPolicy> = match base_policy {
+        let policy_box: Box<dyn synkti_simulation_engine::policies::SchedulingPolicy> = match base_policy {
             "greedy" => Box::new(GreedyPolicy::new()),
             "fallback" => Box::new(OnDemandFallbackPolicy::new(2)), // Fallback after 2 preemptions
             "ondemand" => Box::new(OnDemandOnlyPolicy::new()),

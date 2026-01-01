@@ -1,4 +1,4 @@
-//! Tessera Simulation Engine
+//! Synkti Simulation Engine
 //!
 //! Discrete-event simulator for testing spot instance orchestration policies.
 
