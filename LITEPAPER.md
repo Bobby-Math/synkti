@@ -91,5 +91,5 @@ Tessera is the culmination of this research and vision. To demonstrate its viabi
 
 Tessera is an open-source project, and we welcome collaboration. To follow our progress, contribute to the project, or get in touch, please use the following links:
 
-*   **GitHub:** [Link to your GitHub Repo]
-*   **Twitter/X:** [Link to your Twitter/X Profile]
+*   **GitHub:** []
+*   **Twitter/X:** []

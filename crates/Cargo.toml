@@ -2,25 +2,26 @@
 resolver = "3"
 members = [
 
-"core/tessera-core",
-
-"logic/tessera-scheduler",
-"logic/tessera-greedy-scheduler", # Example alternative scheduler
-
-"executors/tessera-ml-executor", # ML inference executor (uses axon + synapse)
-
-"interfaces/cloud/cloud-traits",
-"interfaces/cloud/aws-provider",
-"interfaces/cloud/gcp-provider", # Example alternative cloud provider
-"interfaces/compute/compute-traits",
-"interfaces/compute/rust-kernels", # Example alternative compute backend
-
-"nodes/tessera-worker",
-"nodes/spot-sentinel",
-
+# ===== PHASE 1: Grant Preparation (Active) =====
 "applications/tessera-simulation-engine",
-"applications/tessera-visualizer",
-"applications/tessera-orchestrator", # Future production server
+
+# ===== PHASE 2+: Production Components (Excluded - dependencies not ready) =====
+# NOTE: These crates require axon/synapse GPU features not yet implemented
+# Uncomment after completing Synapse Phase 2 (CUDA) and Axon implementation
+
+# "core/tessera-core",
+# "logic/tessera-scheduler",
+# "logic/tessera-greedy-scheduler",
+# "executors/tessera-ml-executor", # Requires axon + synapse GPU
+# "interfaces/cloud/cloud-traits",
+# "interfaces/cloud/aws-provider",
+# "interfaces/cloud/gcp-provider",
+# "interfaces/compute/compute-traits",
+# "interfaces/compute/rust-kernels",
+# "nodes/tessera-worker",
+# "nodes/spot-sentinel",
+# "applications/tessera-visualizer",
+# "applications/tessera-orchestrator",
 
 ]
 
