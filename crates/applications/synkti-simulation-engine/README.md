@@ -9,8 +9,8 @@ Discrete-event simulator for spot instance orchestration with **optimal migratio
 ## Quick Start
 
 ```bash
-cd /home/bobby/spot/tessera/crates
 
+# From Project Root 
 # Run simulation comparing 3 policies
 cargo run --release -p synkti-simulation-engine -- --duration 48 --tasks 100
 
@@ -44,6 +44,7 @@ if !fits_in_memory: cost = INFINITY
 ---
 
 ### 2. Grace Period Checkpoint Exploitation
+
 **Problem:** AWS gives 120 seconds warning before terminating spot instances. How to best use this time?
 
 **Solution:** Intelligent decision logic based on transferable data:
@@ -182,7 +183,7 @@ cargo run --release -p synkti-simulation-engine -- \
 
 ### Build Instructions
 ```bash
-cd /home/bobby/spot/tessera/crates
+cd crates
 cargo build --release -p synkti-simulation-engine
 ```
 
@@ -224,8 +225,6 @@ Cost Savings vs OnDemandOnly baseline:
 | `main.rs` | 200 | - | CLI interface with migration strategy support |
 | **Total** | **2,191** | **32** | **Complete system** |
 
-See [`concise_summary.md`](./concise_summary.md) for detailed module descriptions.
-
 ---
 
 ## Limitations & Future Work
@@ -257,7 +256,6 @@ This prototype demonstrates:
 - ✅ **Empirical evidence:** Detailed benchmarks showing 1.5-2x improvement over baseline
 
 **Target grants:** Solana Foundation ($20k), Emergent Ventures
-**Grant readiness:** 9.5/10 (complete prototype with naive baseline comparison)
 
 ---
 
@@ -296,9 +294,5 @@ plotly = "0.9"  # For visualization examples
 **Phase:** Grant preparation (Q4 2025)
 **Timeline:** Prototype complete, applying for funding January 2026
 
-For parent project context, see [`/home/bobby/spot/tessera/CLAUDE.md`](../../../CLAUDE.md)
-
 ---
 
-**Last Updated:** December 27, 2025
-**Status:** Ready for grant submission ✅
