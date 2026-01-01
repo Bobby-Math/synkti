@@ -6,8 +6,8 @@
 
 ## Project Status
 
-**Phase 1 (Q4 2025):** ✅ **Complete** - Grant-ready prototype
-**Target:** Solana Foundation grant ($20k), Emergent Ventures
+**Phase 1 (Q4 2025):** ✅ **Complete** - Research Prototype
+**Current Focus:** Validation & Pilot Program
 
 ---
 
@@ -141,8 +141,8 @@ synkti/
 
 **Author:** Bobby ([github.com/bobby-math](https://github.com/bobby-math))
 **Website:** www.bobby-math.dev
-**Project Phase:** Grant preparation (Q4 2025)
-**Status:** Prototype complete, ready for funding
+**Project Phase:** Research & Validation
+**Status:** Prototype complete, moving to Phase 2 (Pilot)
 
 ---
 

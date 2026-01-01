@@ -1,6 +1,6 @@
 # Synkti Simulation Engine
 
-**Status:** ✅ Phase 1 Complete - Grant-Ready Prototype
+**Status:** ✅ Phase 1 Complete - Research Prototype
 
 Discrete-event simulator for spot instance orchestration with **optimal migration** and **checkpoint-aware recovery**.
 
@@ -245,20 +245,6 @@ Cost Savings vs OnDemandOnly baseline:
 
 ---
 
-## Grant Application Context
-
-This prototype demonstrates:
-- ✅ **Technical sophistication:** Kuhn-Munkres algorithm (provably optimal, 46% better than naive)
-- ✅ **Novel contribution:** Grace period checkpoint exploitation
-- ✅ **Rigorous validation:** 32 tests, realistic spot price modeling, naive vs optimal comparison
-- ✅ **Reproducibility:** Complete build/test instructions with benchmark commands
-- ✅ **Research foundation:** Clear positioning vs prior work (SpotServe, SkyServe)
-- ✅ **Empirical evidence:** Detailed benchmarks showing 1.5-2x improvement over baseline
-
-**Target grants:** Solana Foundation ($20k), Emergent Ventures
-
----
-
 ## Visualization Example
 
 Generate interactive spot behavior chart:
@@ -273,8 +259,7 @@ cargo run --example visualize_spot_behavior
 
 ## Dependencies
 
-```toml
-[dependencies]
+```toml [dependencies]
 serde = "1.0"
 serde_json = "1.0"
 rand = "0.8"
@@ -291,8 +276,8 @@ plotly = "0.9"  # For visualization examples
 ## Contact
 
 **Project:** Synkti (Domain-agnostic spot instance orchestration)
-**Phase:** Grant preparation (Q4 2025)
-**Timeline:** Prototype complete, applying for funding January 2026
+**Phase:** Research & Validation
+**Timeline:** Prototype complete, preparing for real-world pilot
 
 ---
 
