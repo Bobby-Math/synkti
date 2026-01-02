@@ -7,6 +7,7 @@
 ## Project Status
 
 **Phase 1 (Q4 2025):** ✅ **Complete** - Research Prototype
+
 **Current Focus:** Validation & Pilot Program
 
 ---
@@ -89,7 +90,6 @@ synkti/
 │           ├── README.md             (Detailed documentation)
 │           └── Cargo.toml
 ├── LITEPAPER.md                      (Vision & roadmap)
-└── CLAUDE.md                         (Development context)
 ```
 
 ---
@@ -98,6 +98,7 @@ synkti/
 
 - [Simulation Engine README](crates/applications/synkti-simulation-engine/README.md) - Complete technical documentation
 - [Litepaper](LITEPAPER.md) - Vision and long-term roadmap
+- [Funding Roadmap](VISION.md) - Phase 2 deliverables and execution plan
 
 ---
 
@@ -130,9 +131,13 @@ synkti/
 ## Technical Highlights
 
 **Modules:** 7 core modules (2,191 lines)
+
 **Tests:** 32 comprehensive tests
+
 **Algorithms:** Kuhn-Munkres (optimal), Ornstein-Uhlenbeck (price generation)
+
 **Architecture:** Event-driven simulation, priority queue, pluggable policies
+
 **Dependencies:** Pure Rust (no GPU required for simulation)
 
 ---
@@ -140,8 +145,11 @@ synkti/
 ## Contact
 
 **Author:** Bobby ([github.com/bobby-math](https://github.com/bobby-math))
+
 **Website:** www.bobby-math.dev
+
 **Project Phase:** Research & Validation
+
 **Status:** Prototype complete, moving to Phase 2 (Pilot)
 
 ---
