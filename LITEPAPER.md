@@ -2,7 +2,7 @@
 
 ## Abstract
 
-Synkti is an orchestration protocol that makes volatile spot instances production-ready through provably optimal migration and intelligent checkpoint recovery. By achieving 73-82% cost reduction while maintaining reliability, Synkti transforms GPU compute economics for AI workloads.
+Synkti is an orchestration protocol that makes volatile spot instances production-ready through provably optimal migration and intelligent checkpoint recovery. By achieving up to 80% cost reduction while maintaining reliability, Synkti transforms GPU compute economics for AI workloads.
 
 **Phase 1 Complete (January 2026):** Research prototype with 2,191 lines of Rust, 32 tests passing, and validated cost savings through discrete-event simulation.
 
@@ -205,7 +205,7 @@ Synkti's architecture implements **two-layer abstraction** to democratize access
 - ✅ Checkpoint recovery system (382 lines, 9 tests)
 - ✅ Realistic spot price generation (Ornstein-Uhlenbeck process)
 - ✅ 32 comprehensive tests (100% passing)
-- ✅ Benchmark validation: 73-82% cost savings
+- ✅ Benchmark validation: Up to 80% cost savings (200-task rigorous test)
 - ✅ Open-source repository with documentation
 
 **Technical Proof:**

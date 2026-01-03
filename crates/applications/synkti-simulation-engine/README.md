@@ -142,7 +142,8 @@ Discrete-Event Simulator (simulator.rs - Priority queue event loop)
 **Key Findings:**
 - Optimal migration makes aggressive spot usage viable (Greedy competitive with Fallback)
 - Checkpoint system correctly identifies early preemptions (nothing to save)
-- Realistic cost savings (73-82%) align with SpotServe paper claims
+- Realistic cost savings align with SpotServe paper claims
+- **Note:** For most rigorous validation, see 200-task benchmark below
 
 ---
 
