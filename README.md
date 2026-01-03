@@ -60,7 +60,6 @@ cargo run --release -p synkti-simulation-engine -- \
   --on-demand-price 1.00 \
   --spot-price 0.30 \
   --preemption-rate 0.05 \
-  --network-bandwidth 10.0 \
   --output custom_results.json
 ```
 
