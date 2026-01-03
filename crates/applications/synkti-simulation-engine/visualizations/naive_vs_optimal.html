@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+</head>
+
+<body>
+    <div>
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg.js"></script>
+        <script src="https://cdn.plot.ly/plotly-2.12.1.min.js"></script>
+        <div id="plotly-html-element" class="plotly-graph-div" style="height:100%; width:100%;"></div>
+
+        <script type="module">
+            const graph_div = document.getElementById("plotly-html-element");
+            await Plotly.newPlot(graph_div, {"data":[{"type":"bar","x":["Greedy","OnDemandFallback"],"y":[446.96,1294.33],"name":"Naive (First-Fit)","marker":{"color":"rgba(255, 140, 0, 0.7)"}},{"type":"bar","x":["Greedy","OnDemandFallback"],"y":[415.72,696.04],"name":"Optimal (Kuhn-Munkres)","marker":{"color":"rgba(34, 139, 34, 0.7)"}}],"layout":{"title":{"text":"Naive vs Optimal Migration Algorithms (200 tasks, 72h)"},"hovermode":"x","xaxis":{"title":{"text":"Scheduling Policy"}},"yaxis":{"title":{"text":"Total Cost ($)"},"gridcolor":"lightgray"},"annotations":[{"text":"Saves $31.24\u003cbr\u003e(7.0% better)","font":{"size":10,"color":"green"},"showarrow":false,"x":0.0,"y":491.656},{"text":"Saves $598.29\u003cbr\u003e(46.2% better!)","font":{"size":10,"color":"blue"},"showarrow":false,"x":1.0,"y":1359.0465}],"barmode":"group"},"config":{}});
+        </script>
+    </div>
+</body>
+
+</html>
