@@ -30,7 +30,9 @@ Synkti is a sophisticated orchestration system for managing GPU workloads on vol
 ## Quick Demo
 
 ```bash
-cd crates
+# Clone the repo and move to crates/ directory 
+git clone git@github.com:Bobby-Math/synkti.git
+cd synkti/crates/
 
 # Run simulation (200 tasks, 72 hours - rigorous benchmark)
 cargo run --release -p synkti-simulation-engine -- --duration 72 --tasks 200
