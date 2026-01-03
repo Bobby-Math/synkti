@@ -45,7 +45,7 @@ cost(task, instance) = kv_cache_size_mb / (network_bandwidth_gbps × 125 MB/s)
                      = INFINITY if task doesn't fit in instance memory
 ```
 
-**Result:** 46% better cost savings than naive first-fit reassignment.
+**Result:** 7-46% cost reduction vs naive first-fit, depending on policy (7% for aggressive Greedy, 46% for conservative OnDemandFallback).
 
 **Benchmark (200 tasks, 72 hours):**
 - Greedy + Optimal KM: $415.72 (79.9% savings)
@@ -209,7 +209,7 @@ Synkti's architecture implements **two-layer abstraction** to democratize access
 - ✅ Open-source repository with documentation
 
 **Technical Proof:**
-- Optimal migration is 46% better than naive baseline
+- Optimal migration provides 7-46% cost reduction vs naive (policy-dependent)
 - Checkpoint recovery maintains progress during preemptions
 - Domain-agnostic design validated through pluggable policies
 
@@ -284,7 +284,7 @@ Synkti automatically chooses optimal instance mix (spot + on-demand), pre-warms 
 
 | System | Focus | Key Limitation | Synkti Improvement |
 |--------|-------|----------------|-------------------|
-| **SpotServe** (OSDI '24) | LLM inference resilience | Greedy migration, LLM-only | Optimal KM algorithm (46% better), domain-agnostic |
+| **SpotServe** (OSDI '24) | LLM inference resilience | Greedy migration, LLM-only | Optimal KM algorithm (7-46% better), domain-agnostic |
 | **SkyServe** | Multi-cloud serving | Coarse-grained failover | Fine-grained checkpoint recovery + migration |
 | **Can't Be Late** (EuroSys '24) | Batch deadlines | No GPU support, no checkpointing | GPU memory constraints, grace period exploitation |
 

@@ -46,7 +46,7 @@ cost = kv_cache_size_mb / (network_bandwidth_gbps * 125 MB/s)
 if !fits_in_memory: cost = INFINITY
 ```
 
-**Impact:** Optimal KM migration achieves **46% better cost savings** compared to naive first-fit reassignment (see benchmarks below).
+**Impact:** Optimal KM migration provides **7-46% cost reduction** vs naive first-fit, depending on policy (7% for aggressive Greedy, 46% for conservative OnDemandFallback).
 
 ---
 

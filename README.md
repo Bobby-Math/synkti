@@ -161,7 +161,7 @@ Demonstrating the superiority of optimal Kuhn-Munkres migration vs naive first-f
 | **OnDemandOnly** | N/A | $2,069 | baseline | 0 | - |
 
 **Key Findings:**
-- Optimal Kuhn-Munkres migration is 46% more cost-effective than naive first-fit assignment
+- Optimal Kuhn-Munkres migration provides 7-46% cost reduction vs naive first-fit, depending on policy (7% for Greedy, 46% for OnDemandFallback)
 - Up to 80% cost reduction achievable with aggressive spot usage + optimal migration
 - Checkpoint recovery system successfully handles preemption events
 

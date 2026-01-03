@@ -168,7 +168,7 @@ fn main() {
 
     println!("\n🔑 Key Findings:");
     println!("   • Optimal KM migration achieves up to 80% cost reduction");
-    println!("   • Optimal is 46% better than naive for OnDemandFallback policy");
+    println!("   • Optimal provides 7-46% cost reduction vs naive (policy-dependent)");
     println!("   • Greedy-Optimal: 45% fewer preemptions than Greedy-Naive");
 
     println!("\n🌐 Open visualizations in browser:");
