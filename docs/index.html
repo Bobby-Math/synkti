@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Synkti - Interactive Benchmark Results</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 30px 40px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .stat-box {
+            text-align: center;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .stat-box .number {
+            font-size: 2.5em;
+            font-weight: 700;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .stat-box .label {
+            font-size: 0.9em;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .section {
+            margin-bottom: 50px;
+        }
+
+        .section h2 {
+            font-size: 2em;
+            margin-bottom: 15px;
+            color: #333;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .section p {
+            font-size: 1.1em;
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        .viz-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin-top: 30px;
+        }
+
+        .viz-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 25px;
+            transition: transform 0.2s, box-shadow 0.2s;
+            border: 2px solid transparent;
+        }
+
+        .viz-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            border-color: #667eea;
+        }
+
+        .viz-card h3 {
+            font-size: 1.4em;
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .viz-card p {
+            font-size: 0.95em;
+            color: #666;
+            margin-bottom: 15px;
+        }
+
+        .viz-card a {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        .viz-card a:hover {
+            background: #5568d3;
+        }
+
+        .key-findings {
+            background: #e7f3ff;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .key-findings h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .key-findings ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .key-findings li {
+            padding: 8px 0;
+            padding-left: 25px;
+            position: relative;
+        }
+
+        .key-findings li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #667eea;
+            font-weight: bold;
+        }
+
+        .code-block {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+
+        .code-block .comment {
+            color: #6272a4;
+        }
+
+        .code-block .command {
+            color: #50fa7b;
+        }
+
+        footer {
+            background: #2d2d2d;
+            color: white;
+            padding: 30px 40px;
+            text-align: center;
+        }
+
+        footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        .badge {
+            display: inline-block;
+            background: #28a745;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Synkti<span class="badge">v1.0</span></h1>
+            <p>Optimal Orchestration for Volatile Spot Instances</p>
+            <p style="font-size: 0.9em; margin-top: 10px; opacity: 0.8;">
+                Interactive Benchmark Results | Phase 1 Complete
+            </p>
+        </header>
+
+        <div class="stats">
+            <div class="stat-box">
+                <div class="number">80%</div>
+                <div class="label">Cost Reduction</div>
+            </div>
+            <div class="stat-box">
+                <div class="number">2,191</div>
+                <div class="label">Lines of Rust</div>
+            </div>
+            <div class="stat-box">
+                <div class="number">32</div>
+                <div class="label">Tests Passing</div>
+            </div>
+            <div class="stat-box">
+                <div class="number">46%</div>
+                <div class="label">Better Than Naive</div>
+            </div>
+        </div>
+
+        <div class="content">
+            <div class="section">
+                <h2>Overview</h2>
+                <p>
+                    Synkti is a research prototype that achieves <strong>up to 80% cost reduction</strong> for GPU workloads on volatile spot instances through provably optimal migration and intelligent checkpoint recovery.
+                </p>
+                <div class="key-findings">
+                    <h3>Key Findings (200 tasks, 72-hour simulation)</h3>
+                    <ul>
+                        <li>Optimal Kuhn-Munkres migration is <strong>46% better</strong> than naive first-fit assignment</li>
+                        <li>Greedy-Optimal policy achieves <strong>79.9% cost savings</strong> vs on-demand baseline</li>
+                        <li>Checkpoint recovery successfully handles preemption events</li>
+                        <li>45% fewer preemptions with optimal migration (Greedy policy)</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Interactive Visualizations</h2>
+                <p>
+                    Explore the benchmark results through interactive Plotly charts. Hover for details, zoom, and pan.
+                </p>
+
+                <div class="viz-grid">
+                    <div class="viz-card">
+                        <h3>📊 Benchmark Comparison</h3>
+                        <p>
+                            Cost comparison across all policies. Shows the 200-task, 72-hour simulation results with optimal vs naive migration strategies.
+                        </p>
+                        <a href="benchmark_comparison.html">View Benchmark →</a>
+                    </div>
+
+                    <div class="viz-card">
+                        <h3>🎯 Naive vs Optimal</h3>
+                        <p>
+                            Direct comparison demonstrating the superiority of Kuhn-Munkres optimal migration over naive first-fit assignment.
+                        </p>
+                        <a href="naive_vs_optimal.html">View Comparison →</a>
+                    </div>
+
+                    <div class="viz-card">
+                        <h3>📈 Spot Price Behavior</h3>
+                        <p>
+                            Realistic spot instance market simulation using Ornstein-Uhlenbeck stochastic process. Shows price volatility and preemption risk.
+                        </p>
+                        <a href="spot_behavior.html">View Market Simulation →</a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Try It Yourself</h2>
+                <p>
+                    Run the simulation on your own machine. Requires Rust 1.91+ (no GPU needed - pure CPU simulation).
+                </p>
+
+                <div class="code-block">
+<span class="comment"># Clone the repository</span>
+<span class="command">git clone https://github.com/bobby-math/synkti</span>
+<span class="command">cd synkti/crates</span>
+
+<span class="comment"># Run 200-task, 72-hour simulation</span>
+<span class="command">cargo run --release -p synkti-simulation-engine -- --duration 72 --tasks 200</span>
+
+<span class="comment"># Run all tests (32 passing)</span>
+<span class="command">cargo test -p synkti-simulation-engine</span>
+
+<span class="comment"># Generate visualizations</span>
+<span class="command">cargo run --example visualize_benchmark_comparison</span>
+<span class="command">cargo run --example visualize_naive_vs_optimal</span>
+<span class="command">cargo run --example visualize_spot_behavior</span>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Technical Highlights</h2>
+                <div class="viz-grid">
+                    <div class="viz-card">
+                        <h3>🧮 Kuhn-Munkres Migration</h3>
+                        <p>
+                            Provably optimal task-to-instance assignment using Hungarian algorithm. 443 lines, 11 tests.
+                        </p>
+                    </div>
+
+                    <div class="viz-card">
+                        <h3>⏱️ Checkpoint Recovery</h3>
+                        <p>
+                            Intelligent exploitation of AWS's 120-second grace period. Full/Partial/Restart decision logic. 382 lines, 9 tests.
+                        </p>
+                    </div>
+
+                    <div class="viz-card">
+                        <h3>🔄 Domain-Agnostic Design</h3>
+                        <p>
+                            Clean separation between orchestration logic and workload type via pluggable scheduling policies.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Benchmark Configuration</h2>
+                <p><strong>Workload:</strong> 200 inference tasks (Llama-2-70B equivalent)</p>
+                <p><strong>Duration:</strong> 72 hours continuous simulation</p>
+                <p><strong>Spot Price:</strong> $0.30/hr (30% of on-demand)</p>
+                <p><strong>On-Demand Price:</strong> $1.00/hr (baseline)</p>
+                <p><strong>Preemption Rate:</strong> 5% per hour (realistic AWS rate)</p>
+                <p><strong>Network Bandwidth:</strong> 10 Gbps (typical AWS instance)</p>
+            </div>
+        </div>
+
+        <footer>
+            <p>
+                <strong>Synkti</strong> - Phase 1 Complete (January 2026)
+            </p>
+            <p style="margin-top: 10px;">
+                <a href="https://github.com/bobby-math/synkti" target="_blank">GitHub Repository</a> |
+                <a href="https://bobby-math.dev" target="_blank">Website</a> |
+                Server Side Public License (SSPL) v1.0
+            </p>
+            <p style="margin-top: 20px; font-size: 0.9em; opacity: 0.7;">
+                Developed by Bobby | Independent Protocol Developer
+            </p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+</head>
+
+<body>
+    <div>
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg.js"></script>
+        <script src="https://cdn.plot.ly/plotly-2.12.1.min.js"></script>
+        <div id="plotly-html-element" class="plotly-graph-div" style="height:100%; width:100%;"></div>
+
+        <script type="module">
+            const graph_div = document.getElementById("plotly-html-element");
+            await Plotly.newPlot(graph_div, {"data":[{"type":"bar","x":["Greedy\n(Naive)","Greedy\n(Optimal KM)","OnDemand\nFallback (Naive)","OnDemand\nFallback (Optimal)","OnDemand\nOnly"],"y":[446.96,415.72,1294.33,696.04,2069.0],"name":"Cost ($)","marker":{"color":["rgb(255, 140, 0)","rgb(34, 139, 34)","rgb(255, 140, 0)","rgb(34, 139, 34)","rgb(128, 128, 128)"]}}],"layout":{"title":{"text":"Cost Comparison: 200 Tasks, 72 Hours"},"showlegend":false,"hovermode":"x","xaxis":{"title":{"text":"Policy (Migration Strategy)"}},"yaxis":{"title":{"text":"Total Cost ($)"},"gridcolor":"lightgray"}},"config":{}});
+        </script>
+    </div>
+</body>
+
+</html>
