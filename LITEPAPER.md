@@ -215,6 +215,8 @@ Synkti's architecture implements **two-layer abstraction** to democratize access
 
 **Repository:** [github.com/bobby-math/synkti](https://github.com/bobby-math)
 
+**Interactive Demo:** [https://bobby-math.github.io/synkti/](https://bobby-math.github.io/synkti/)
+
 ## Roadmap
 
 **Development Philosophy:** Synkti follows a **research → product pipeline**—starting with academic-grade algorithms (Phase 1), validating with real users (Phase 2), and scaling to production (Phase 3).
@@ -296,7 +298,9 @@ Synkti automatically chooses optimal instance mix (spot + on-demand), pre-warms 
 ## About
 
 **Developer:** Bobby - Independent protocol developer and cloud researcher
+
 **Focus:** AI infrastructure, distributed systems, Web3
+
 **Background:** Designing systems that make volatile resources production-ready
 
 **Contact:**
@@ -329,7 +333,9 @@ Synkti automatically chooses optimal instance mix (spot + on-demand), pre-warms 
 ## Get Involved
 
 **For Researchers:** Contribute to algorithms, run benchmarks, extend policies
+
 **For Users:** Join pilot program (Phase 2), test on your workloads
+
 **For Investors/Grants:** See VISION.md for funding roadmap
 
 **Repository:** [github.com/bobby-math/synkti](https://github.com/bobby-math/synkti)

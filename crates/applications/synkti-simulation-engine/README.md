@@ -9,20 +9,27 @@ Discrete-event simulator for spot instance orchestration with **optimal migratio
 ## Quick Start
 
 ```bash
-
-# From Project Root 
-# Run simulation comparing 3 policies
-cargo run --release -p synkti-simulation-engine -- --duration 48 --tasks 100
+# From Project Root
+# Run rigorous benchmark (200 tasks, 72 hours)
+cargo run --release -p synkti-simulation-engine -- --duration 72 --tasks 200
 
 # Export results to JSON
-cargo run --release -p synkti-simulation-engine -- --duration 48 --output results.json
+cargo run --release -p synkti-simulation-engine -- --duration 72 --tasks 200 --output results.json
 
-# Run specific policy
-cargo run --release -p synkti-simulation-engine -- --policies greedy
+# Compare naive vs optimal migration strategies
+cargo run --release -p synkti-simulation-engine -- --duration 72 --tasks 200 \
+  --policies greedy-naive,greedy-optimal,fallback-naive,fallback-optimal,ondemand
 
-# Run all tests (28 passing)
+# Run all tests (32 passing)
 cargo test -p synkti-simulation-engine
+
+# Generate interactive visualizations
+cargo run --release --example visualize_benchmark_comparison
+cargo run --release --example visualize_naive_vs_optimal
+cargo run --release --example visualize_spot_behavior
 ```
+
+**📊 [View Interactive Results](https://bobby-math.github.io/synkti/)** - Explore benchmark visualizations
 
 ---
 
@@ -94,8 +101,11 @@ Discrete-Event Simulator (simulator.rs - Priority queue event loop)
 ## Related Work
 
 ### SpotServe (OSDI '24)
+
 **Focus:** LLM inference on spot instances
+
 **Innovation:** Dynamic re-parallelization during preemption
+
 **Limitation:** Greedy migration, LLM-specific, no grace period exploitation
 
 **Synkti Improvement:**
@@ -106,8 +116,11 @@ Discrete-Event Simulator (simulator.rs - Priority queue event loop)
 ---
 
 ### SkyServe
+
 **Focus:** Multi-cloud LLM serving
+
 **Innovation:** Global replica placement across clouds/regions
+
 **Limitation:** No intra-replica healing, coarse-grained failover
 
 **Synkti Improvement:**
@@ -118,8 +131,11 @@ Discrete-Event Simulator (simulator.rs - Priority queue event loop)
 ---
 
 ### Can't Be Late (EuroSys '24)
+
 **Focus:** Batch jobs with strict deadlines
+
 **Innovation:** Uniform Progress policy for deadline-aware scheduling
+
 **Limitation:** No interactive workload support, no GPU orchestration
 
 **Synkti Improvement:**
@@ -194,22 +210,24 @@ cargo test -p synkti-simulation-engine
 # Expected: 32 tests passing (100% pass rate)
 ```
 
-### Run Example Simulation
+### Run Rigorous Benchmark
 ```bash
-cargo run --release -p synkti-simulation-engine -- --duration 48 --tasks 100
+cargo run --release -p synkti-simulation-engine -- --duration 72 --tasks 200
 ```
 
-**Expected Output:**
+**Expected Output (with optimal migration):**
 ```
 Policy                   Cost ($)    Completed  Preemptions     Checkpoints
-Greedy                     193.43         92/100            8 0/39 (0.0h saved)
-OnDemandFallback           157.31         92/100            8 0/53 (0.0h saved)
-OnDemandOnly               878.89         92/100            0             N/A
+Greedy-Optimal           415.72        200/200           12 ...
+OnDemandFallback-Optimal 696.04        200/200           16 ...
+OnDemandOnly            2069.00        200/200            0             N/A
 
 Cost Savings vs OnDemandOnly baseline:
-  Greedy             $  685.46 ( 78.0%)
-  OnDemandFallback   $  721.58 ( 82.1%)
+  Greedy-Optimal           $1,653.28 (79.9%)
+  OnDemandFallback-Optimal $1,372.96 (66.4%)
 ```
+
+**📊 [View Interactive Visualizations](https://bobby-math.github.io/synkti/)** of these results
 
 ---
 
@@ -277,7 +295,9 @@ plotly = "0.9"  # For visualization examples
 ## Contact
 
 **Project:** Synkti (Domain-agnostic spot instance orchestration)
+
 **Phase:** Research & Validation
+
 **Timeline:** Prototype complete, preparing for real-world pilot
 
 ---

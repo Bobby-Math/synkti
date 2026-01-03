@@ -1,9 +1,13 @@
 # Synkti: Vision & Funding Roadmap
 
 **Project:** Synkti - Optimal Orchestration for Volatile Compute
+
 **Developer:** Bobby (Independent Protocol Developer)
+
 **Funding Target:** $25,000-50,000 USD (depending on scope and milestones)
+
 **Timeline:** 6-12 months for Phase 2 (Production MVP with real cloud integration)
+
 **Status:** Phase 1 complete, seeking funding for Phase 2 validation
 
 ---
@@ -313,9 +317,10 @@ Demonstrating optimal Kuhn-Munkres migration vs naive first-fit baseline:
 4. ✅ Most rigorous configuration (200 tasks, 72h) proves algorithmic superiority
 
 **Public Repository:**
-- Open-source on GitHub (SSPL license)
+- GitHub: [github.com/bobby-math/synkti](https://github.com/bobby-math)
+- Interactive Demo: [https://bobby-math.github.io/synkti/](https://bobby-math.github.io/synkti/)
+- Open-source (SSPL license)
 - Comprehensive documentation and reproducibility instructions
-- Grant-quality technical writing
 
 ---
 
@@ -324,7 +329,9 @@ Demonstrating optimal Kuhn-Munkres migration vs naive first-fit baseline:
 ### Overview: From Simulation to Production
 
 **Timeline:** 6-12 months
+
 **Budget:** $25,000-50,000 USD (depending on scope)
+
 **Outcome:** Production orchestrator managing real AWS Spot instances with pilot users
 
 ---
@@ -624,6 +631,7 @@ Demonstrating optimal Kuhn-Munkres migration vs naive first-fit baseline:
 **Funding Range:** $25,000-50,000 USD (depending on scope)
 
 **Base Scope ($25,000):** Phase 2 core deliverables (AWS validation, pilot program)
+
 **Extended Scope ($40,000-50,000):** Additional features (Prognostics Engine, multi-cloud support, early blockchain integration)
 
 ### Budget Allocation (Base Scope - $25,000)
@@ -958,7 +966,9 @@ Synkti has a validated foundation (Phase 1 complete) and a clear path to product
 - Path to blockchain-based decentralized protocol (Phase 3)
 
 **Timeline:** 6-12 months
+
 **Budget:** $25,000-50,000 USD (depending on scope)
+
 **Outcome:** Production system with validated cost savings and pilot users
 
 **For funding inquiries:** hello@bobby-math.dev
@@ -966,6 +976,9 @@ Synkti has a validated foundation (Phase 1 complete) and a clear path to product
 ---
 
 **Submitted by:** Bobby
+
 **Date:** January 2026
+
 **Contact:** hello@bobby-math.dev 
+
 **Website:** www.bobby-math.dev 
