@@ -221,22 +221,28 @@ Synkti's architecture implements **two-layer abstraction** to democratize access
 
 **Development Philosophy:** Synkti follows a **research → product pipeline**—starting with academic-grade algorithms (Phase 1), validating with real users (Phase 2), and scaling to production (Phase 3).
 
-### Phase 2: Production MVP (6 Months, Grant-Funded)
+### Phase 2: Production MVP + Research Validation (6 Months, Grant-Funded)
 
-**Objective:** Deploy working system on real cloud infrastructure with pilot users.
+**Objective:** Deploy production system with Level 3 Prognostics Engine, validated across 243 scenarios.
+
+**Philosophy:** Research → product pipeline means building mathematical foundation first, then applying it to production infrastructure.
 
 **Key Deliverables:**
-1. **Real Cloud Integration** - AWS Spot API, GCP preemptible instances
-2. **Production Orchestrator** - Multi-instance management with real migrations
-3. **User Interface** - CLI + web dashboard for job submission and monitoring
-4. **Pilot Program** - 3-5 early adopters running production workloads
-5. **Performance Validation** - Real-world benchmarks vs simulation predictions
+1. **State Space Formalization** - Mathematical framework for optimal recovery strategies
+2. **Prognostics Engine** - ARIMA + FFT/DSP for proactive preemption handling (Level 3 orchestration)
+3. **243-Scenario Validation** - Comprehensive testing across model size × network × volatility × context × quantization
+4. **Real Cloud Integration** - AWS Spot API with state space calculator integration
+5. **Production Orchestrator** - Control plane (scheduling, migration, prognostics) + data plane (instance agents for task execution and health monitoring)
+6. **Pilot Program** - 3-5 early adopters running production workloads
+7. **Validation Report** - Prove simulation accuracy <5% error vs reality
 
 **Success Metrics:**
+- Simulation accuracy <5% error (not just "roughly matches")
+- Prognostics accuracy >70% (ARIMA or FFT)
+- 243 scenarios tested (comprehensive, not cherry-picked)
 - 70%+ cost reduction validated on real AWS workloads
 - 3+ pilot users running production inference/training
-- <5% job failure rate despite spot volatility
-- Open-source release with production-ready documentation
+- Open-source release with prognostics library
 
 ---
 

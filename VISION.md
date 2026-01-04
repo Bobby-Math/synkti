@@ -326,13 +326,24 @@ Demonstrating optimal Kuhn-Munkres migration vs naive first-fit baseline:
 
 ## Phase 2 Deliverables (Grant-Funded)
 
-### Overview: From Simulation to Production
+### Overview: Research → Product Pipeline
 
-**Timeline:** 6-12 months
+**Timeline:** 6 months (February - July 2026)
 
-**Budget:** $25,000-50,000 USD (depending on scope)
+**Budget:** $45,000 USD (milestone-based)
 
-**Outcome:** Production orchestrator managing real AWS Spot instances with pilot users
+**Outcome:** Production orchestrator with Level 3 Prognostics Engine, validated across 243 scenarios, with 3-5 pilot users
+
+**Philosophy:** Phase 2 validates Phase 1 algorithms on real infrastructure while deepening the mathematical foundation. Research components don't delay product—they make validation comprehensive across 243 scenarios instead of just a handful.
+
+**Key Additions to Original Plan:**
+1. **Month 1 Pure Research:** State space formalization + ARIMA/FFT prognostics foundations
+2. **Prognostics Engine:** Level 3 orchestration (proactive preemption handling, not just reactive)
+3. **243-Scenario Validation:** Multi-dimensional testing across model size × network × volatility × context × quantization
+4. **Personal Compute Equipment:** $3k investment for sustainable simulation capability (mini PC for 24/7 parameter sweeps)
+5. **Comprehensive Validation:** Target <5% error between simulation and reality (not vague claims)
+
+**Detailed breakdown:** See `grants/SOLANA_FOUNDATION.md` and `grants/EMERGENT_VENTURES.md` for complete milestone structure
 
 ---
 
