@@ -319,7 +319,7 @@ Demonstrating optimal Kuhn-Munkres migration vs naive first-fit baseline:
 **Public Repository:**
 - GitHub: [github.com/bobby-math/synkti](https://github.com/bobby-math)
 - Interactive Demo: [https://bobby-math.github.io/synkti/](https://bobby-math.github.io/synkti/)
-- Open-source (SSPL license)
+- Open-source (AGPL-3.0 license)
 - Comprehensive documentation and reproducibility instructions
 
 ---
@@ -603,7 +603,7 @@ Demonstrating optimal Kuhn-Munkres migration vs naive first-fit baseline:
 - Domain-agnostic architecture (works for training, inference, batch processing)
 
 **Ecosystem Benefits:**
-- Open-source algorithms (SSPL license protects from cloud provider exploitation)
+- Open-source algorithms (AGPL-3.0 license ensures modifications are shared back)
 - Reference implementation for DePIN projects (io.net, Nosana, Akash, Bittensor)
 - Educational content for distributed systems community
 

@@ -280,7 +280,7 @@ workload:
 
 Synkti automatically chooses optimal instance mix (spot + on-demand), pre-warms standby instances, routes traffic based on predicted preemptions, and migrates with zero user-visible downtime. Future iterations could use machine learning on code embeddings to predict resource requirements automatically, eliminating manual manifest writing entirely. This works for **any application type**—ML inference is Phase 1, but the architecture generalizes to batch processing, streaming, training, and more. The goal: make decentralized compute as easy to deploy as AWS Lambda, but 70% cheaper and censorship-resistant.
 
-**Open-Source Foundation:** All core algorithms and orchestration logic will remain open-source (SSPL license), preventing vendor lock-in while enabling commercial innovation.
+**Open-Source Foundation:** All core algorithms and orchestration logic are open-source under AGPL-3.0, ensuring modifications are shared back while enabling commercial use and innovation.
 
 **Path to Decentralization:** Phase 3 transforms Synkti into a permissionless protocol, creating a truly global compute fabric independent of any single provider.
 
@@ -314,25 +314,22 @@ Synkti automatically chooses optimal instance mix (spot + on-demand), pre-warms 
 - Website: [bobby-math.dev](https://bobby-math.dev)
 - Email: hello@bobby-math.dev  
 
-**License:** Server Side Public License (SSPL) v1.0
+**License:** GNU Affero General Public License v3.0 (AGPL-3.0)
 
-### Why SSPL? Protecting Innovation from Cloud Provider Exploitation
+### Why AGPL-3.0? Commitment to Open Source
 
-**The Problem:** Synkti orchestrates compute on top of AWS, GCP, and Azure. Without license protection, these providers could:
-- Fork Synkti's algorithms (Kuhn-Munkres migration, checkpoint recovery)
-- Integrate into their managed services (AWS ECS, Google GKE, Azure AKS)
-- Offer "AWS Spot Orchestrator" using your research and code
-- Provide zero attribution, zero contribution back, zero leverage for the creator
+**The Choice:** We chose AGPL-3.0 because Synkti is foundational infrastructure that should remain a public good.
 
-**SSPL Protection:** If a cloud provider offers Synkti as a managed service, they must open-source their entire orchestration stack under SSPL. Since AWS/GCP/Azure will never open-source their proprietary orchestration layers, this effectively prevents exploitation while keeping the code fully available for:
-- ✅ Self-hosting (individuals, startups, enterprises)
-- ✅ Research and academic use
-- ✅ Forking for non-service use cases
-- ✅ Contributing improvements back to the ecosystem
+**What AGPL-3.0 Ensures:**
+- ✅ All modifications must be shared back (even for network services)
+- ✅ OSI-approved and FSF-approved license
+- ✅ Compatible with research grants requiring open-source licensing
+- ✅ Self-hosting, research, academic, and commercial use all permitted
+- ✅ Contributor-friendly, enabling community growth
 
-**Why This Matters:** Independent developers deserve protection when building infrastructure that competes with trillion-dollar incumbents. SSPL enables open-source innovation without enabling rent extraction by the very platforms the software orchestrates.
+**Our Moat:** The real value isn't in the code—it's in the systems knowledge and network effects. Anyone can read the algorithms. Few can deploy and operate them effectively. The expertise to configure, tune, and optimize Synkti for specific workloads is the service layer.
 
-**Precedent:** MongoDB (SSPL creator), Elasticsearch, Redis all adopted SSPL for the same reason—preventing AWS from offering managed versions without contributing back.
+**Philosophy:** Good protocols are built on solid foundations, shared openly. The knowledge to use them well is what creates sustainable value.
 
 ---
 

@@ -195,6 +195,6 @@ Demonstrating the superiority of optimal Kuhn-Munkres migration vs naive first-f
 
 ## License
 
-Server Side Public License (SSPL) v1.0
+GNU Affero General Public License v3.0 (AGPL-3.0)
 
 ---
