@@ -5,6 +5,9 @@ members = [
 # ===== PHASE 1: Grant Preparation (Active) =====
 "applications/synkti-simulation-engine",
 
+# ===== PHASE 2: AWS Orchestrator (Active Development) =====
+"applications/synkti-orchestrator",
+
 # ===== PHASE 2+: Production Components (Excluded - dependencies not ready) =====
 # NOTE: These crates require axon/synapse GPU features not yet implemented
 # Uncomment after completing Synapse Phase 2 (CUDA) and Axon implementation
@@ -21,7 +24,6 @@ members = [
 # "nodes/synkti-worker",
 # "nodes/spot-sentinel",
 # "applications/synkti-visualizer",
-# "applications/synkti-orchestrator",
 
 ]
 

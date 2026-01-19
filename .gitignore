@@ -1,2 +1,5 @@
 target
 *.tar
+
+# Internal documentation (not for public repo)
+INTERNAL.md
