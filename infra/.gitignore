@@ -15,3 +15,4 @@ crash.*.log
 # Override files
 override.tf
 override.tf.json
+terraform.tfvars

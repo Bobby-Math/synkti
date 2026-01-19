@@ -5,7 +5,7 @@
 # Run this ONCE to upload the orchestrator binary and model weights to S3.
 #
 # Usage:
-#   ./scripts/bootstrap.sh --project my-prod --model-path /path/to/model
+#   ./scripts/bootstrap.sh --project my-prod
 
 set -euo pipefail
 
@@ -33,9 +33,13 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: $0 [--project NAME] [--model-path PATH] [--region REGION]"
       echo ""
       echo "Options:"
-      echo "  --project NAME     Project name (default: synkti-prod)"
-      echo "  --model-path PATH  Path to local model directory to upload"
-      echo "  --region REGION    AWS region (default: us-east-1)"
+      echo "  --project NAME    Project name (default: synkti-prod)"
+      echo "  --model-path PATH Path to local model directory to upload"
+      echo "  --region REGION   AWS region (default: us-east-1)"
+      echo ""
+      echo "All resources are named based on project_name:"
+      echo "  S3: ${PROJECT_NAME}-models, ${PROJECT_NAME}-checkpoints-xxx"
+      echo "  IAM: ${PROJECT_NAME}-control-plane, ${PROJECT_NAME}-worker"
       exit 0
       ;;
     *)
@@ -72,51 +76,49 @@ cd "$REPO_DIR/infra"
 terraform init
 terraform apply -auto-approve -var="project_name=$PROJECT_NAME"
 
-MODELS_BUCKET=$(terraform output -raw models_bucket_name)
+BUCKET_NAME=$(terraform output -raw models_bucket_name)
 CHECKPOINT_BUCKET=$(terraform output -raw checkpoint_bucket_name)
 
 echo ""
-echo "📋 Buckets created:"
-echo "  Models:      $MODELS_BUCKET"
+echo "📋 Buckets:"
+echo "  Models:      $BUCKET_NAME"
 echo "  Checkpoints: $CHECKPOINT_BUCKET"
 
 # Step 3: Upload orchestrator binary to S3
 echo ""
 echo "📤 Step 3: Uploading orchestrator binary to S3..."
-aws s3 cp "$BINARY_PATH" "s3://${MODELS_BUCKET}/bin/synkti-orchestrator" \
+aws s3 cp "$BINARY_PATH" "s3://${BUCKET_NAME}/bin/synkti-orchestrator" \
   --region "$REGION"
-echo "✅ Binary uploaded to: s3://${MODELS_BUCKET}/bin/synkti-orchestrator"
+echo "✅ Binary uploaded to: s3://${BUCKET_NAME}/bin/synkti-orchestrator"
 
 # Step 4: Upload model weights if provided
 if [ -n "$MODEL_PATH" ] && [ -d "$MODEL_PATH" ]; then
   echo ""
   echo "📤 Step 4: Uploading model weights to S3..."
   MODEL_NAME=$(basename "$MODEL_PATH")
-  aws s3 sync "$MODEL_PATH" "s3://${MODELS_BUCKET}/${MODEL_NAME}/" \
+  aws s3 sync "$MODEL_PATH" "s3://${BUCKET_NAME}/${MODEL_NAME}/" \
     --region "$REGION"
-  echo "✅ Model uploaded to: s3://${MODELS_BUCKET}/${MODEL_NAME}/"
+  echo "✅ Model uploaded to: s3://${BUCKET_NAME}/${MODEL_NAME}/"
 else
   echo ""
   echo "⏭️  Step 4: Skipped (no --model-path provided)"
   echo "   Upload models later with:"
-  echo "   aws s3 sync /path/to/model s3://${MODELS_BUCKET}/model-name/"
+  echo "   aws s3 sync /path/to/model s3://${BUCKET_NAME}/model-name/"
 fi
 
-# Step 5: Update user_data with correct binary location
+# Step 5: Next steps
 echo ""
 echo "📝 Step 5: Next steps:"
 echo ""
-echo "1. Update infra/main.tf user_data to use your S3 bucket:"
-echo "   aws s3 cp s3://${MODELS_BUCKET}/bin/synkti-orchestrator /usr/local/bin/synkti-orchestrator"
-echo ""
-echo "2. Commit and push changes:"
+echo "1. Commit and push changes:"
 echo "   git add infra/"
 echo "   git commit -m 'Configure GitOps deployment'"
 echo "   git push"
 echo ""
-echo "3. GitHub Actions will automatically deploy!"
+echo "2. GitHub Actions will automatically deploy!"
 echo ""
 echo "✅ Bootstrap complete!"
 echo ""
-echo "Your permanent models bucket: s3://${MODELS_BUCKET}/"
+echo "Your project: $PROJECT_NAME"
+echo "Models bucket: s3://${BUCKET_NAME}/"
 echo "Upload model weights there, then reference with --model-s3 flag."

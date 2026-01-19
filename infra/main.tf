@@ -150,11 +150,11 @@ resource "aws_iam_instance_profile" "worker" {
 
 # Permanent Models Bucket (NOT deleted on destroy)
 resource "aws_s3_bucket" "models" {
-  bucket = var.models_bucket_name != "" ? var.models_bucket_name : "${var.project_name}-models"
+  bucket = "${var.project_name}-models"
 
   tags = {
-    Name      = var.models_bucket_name != "" ? var.models_bucket_name : "${var.project_name}-models"
-    ManagedBy = "Synkti"
+    Name      = "${var.project_name}-models"
+    ManagedBy  = "Synkti"
     Project   = var.project_name
     Lifecycle = "Permanent"
   }
