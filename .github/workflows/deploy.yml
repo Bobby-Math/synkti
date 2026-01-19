@@ -1,0 +1,202 @@
+# Synkti GitOps Deployment Workflow
+#
+# This workflow automatically deploys infrastructure changes when you push to main.
+#
+# Bootstrap (first time only):
+#   1. Run: cd infra && terraform apply
+#   2. Control plane instance boots and auto-starts orchestrator
+#
+# Subsequent deployments:
+#   1. Push to main branch
+#   2. This workflow runs terraform apply automatically
+#   3. Zero-downtime rolling updates if using ASG
+
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/**'
+      - '.github/workflows/deploy.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'infra/**'
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: 1.6.0
+
+jobs:
+  # Plan: Show what will change (dry-run)
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      tf_plan_changes: ${{ steps.plan.outputs.changes }}
+      tf_plan_output: ${{ steps.plan.outputs.output }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: synkti-github-actions
+
+      - name: Terraform Init
+        working-directory: ./infra
+        run: terraform init
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: ./infra
+        run: |
+          terraform plan -no-color -out=tfplan 2>&1 | tee /tmp/plan.txt
+          echo "stdout<<EOF" >> $GITHUB_OUTPUT
+          cat /tmp/plan.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Comment PR with Plan
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `#### Terraform Plan 📖
+            \`\`\`
+            ${{ steps.plan.outputs.stdout }}
+            \`\`\`
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+  # Apply: Actually make changes (only on push to main)
+  apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: plan
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production
+      url: ${{ steps.outputs.outputs-url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: synkti-github-actions
+
+      - name: Terraform Init
+        working-directory: ./infra
+        run: terraform init
+
+      - name: Terraform Apply
+        id: apply
+        working-directory: ./infra
+        run: terraform apply -auto-approve
+
+      - name: Extract Outputs
+        id: outputs
+        working-directory: ./infra
+        run: |
+          echo "models-bucket=$(terraform output -raw models_bucket_name)" >> $GITHUB_OUTPUT
+          echo "checkpoint-bucket=$(terraform output -raw checkpoint_bucket_name)" >> $GITHUB_OUTPUT
+          echo "control-plane-ip=$(terraform output -raw control_plane_public_ips | head -1)" >> $GITHUB_OUTPUT
+          echo "control-plane-instance=$(terraform output -raw control_plane_instance_ids | head -1)" >> $GITHUB_OUTPUT
+          echo "outputs-url=https://console.aws.amazon.com/ec2/v2/home?region=${{ env.AWS_REGION }}#Instances:instanceId=$(terraform output -raw control_plane_instance_ids | head -1)" >> $GITHUB_OUTPUT
+
+      - name: Verify Orchestrator Health
+        run: |
+          echo "⏳ Waiting for orchestrator to start..."
+          sleep 30
+
+          INSTANCE_ID="${{ steps.outputs.outputs-control-plane-instance }}"
+
+          # Check service status via SSM
+          aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["systemctl is-active synkti"]' \
+            --region us-east-1 \
+            --output text > /dev/null 2>&1
+
+          # Get the command output
+          COMMAND_ID=$(aws ssm list-commands \
+            --instance-ids "$INSTANCE_ID" \
+            --region us-east-1 \
+            --query "sort_by(Commands, &RequestedDateTime)[-1].CommandId" \
+            --output text)
+
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --region us-east-1 \
+            --query "StandardOutputContent" \
+            --output text
+
+          echo "✅ Orchestrator health check passed"
+
+      - name: Summary
+        run: |
+          echo "### 🚀 Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Models Bucket | ${{ steps.outputs.outputs-models-bucket }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Checkpoint Bucket | ${{ steps.outputs.outputs-checkpoint-bucket }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Control Plane IP | ${{ steps.outputs.outputs-control-plane-ip }} |" >> $GITHUB_STEP_SUMMARY
+
+  # Security: Scan Terraform for security issues
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy security scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '/infra'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
