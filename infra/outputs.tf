@@ -66,7 +66,7 @@ output "launch_worker_command" {
   description = "Example synkti launch command using Terraformed resources"
   value       = <<-EOT
     synkti-orchestrator launch \
-      --ami ami-xxx \
+      --ami ${var.worker_ami_id != "" ? var.worker_ami_id : "<latest-gpu-ami>"} \
       --instance-type g4dn.xlarge \
       --iam-profile ${aws_iam_instance_profile.worker.name} \
       --security-group ${aws_security_group.worker.id} \

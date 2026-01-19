@@ -109,3 +109,14 @@ variable "huggingface_model_id" {
   type        = string
   default     = "meta-llama/Llama-2-7b-hf"
 }
+
+variable "models_bucket_name" {
+  description = "Name of the models S3 bucket (permanent storage for model weights)"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = can(regex("^[a-z0-9-]+$", var.models_bucket_name)) || var.models_bucket_name == ""
+    error_message = "Bucket name must be lowercase alphanumeric with hyphens only."
+  }
+}

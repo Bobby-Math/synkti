@@ -53,9 +53,11 @@ echo ""
 
 # Step 1: Build the orchestrator
 echo "📦 Step 1: Building synkti-orchestrator..."
-cd "$(dirname "$0")/.."
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+cd "$REPO_DIR/crates"
 cargo build --release -p synkti-orchestrator
-BINARY_PATH="crates/target/release/synkti-orchestrator"
+BINARY_PATH="$REPO_DIR/crates/target/release/synkti-orchestrator"
 
 if [ ! -f "$BINARY_PATH" ]; then
   echo "❌ Binary not found at $BINARY_PATH"
@@ -66,7 +68,7 @@ echo "✅ Built: $BINARY_PATH"
 # Step 2: Create infrastructure (get bucket names)
 echo ""
 echo "🏗️  Step 2: Creating infrastructure..."
-cd infra
+cd "$REPO_DIR/infra"
 terraform init
 terraform apply -auto-approve -var="project_name=$PROJECT_NAME"
 

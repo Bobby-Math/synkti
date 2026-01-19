@@ -9,10 +9,6 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.0"
-    }
   }
 
   backend "local" {
@@ -24,8 +20,6 @@ terraform {
 provider "aws" {
   region = var.aws_region
 }
-
-provider "random" {}
 
 # --- Data Sources ---
 
@@ -156,13 +150,17 @@ resource "aws_iam_instance_profile" "worker" {
 
 # Permanent Models Bucket (NOT deleted on destroy)
 resource "aws_s3_bucket" "models" {
-  bucket = "${var.project_name}-models"
+  bucket = var.models_bucket_name != "" ? var.models_bucket_name : "${var.project_name}-models"
 
   tags = {
-    Name      = "${var.project_name}-models"
+    Name      = var.models_bucket_name != "" ? var.models_bucket_name : "${var.project_name}-models"
     ManagedBy = "Synkti"
     Project   = var.project_name
     Lifecycle = "Permanent"
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
@@ -228,7 +226,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "checkpoints" {
     }
 
     expiration {
-      days = 7
+      days = var.checkpoint_bucket_expiration_days
     }
   }
 }
@@ -241,10 +239,6 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "checkpoints" {
       sse_algorithm = "AES256"
     }
   }
-}
-
-resource "random_id" "suffix" {
-  byte_length = 4
 }
 
 # --- Security Groups ---
