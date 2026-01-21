@@ -1,6 +1,13 @@
 //! S3 checkpoint storage
 //!
+//! ⚠️ **DEPRECATED: This module depends on `checkpoint.rs` which does not work with GPU/TPU.**
+//!
+//! Stateless failover (drain → respawn) does not require checkpoint storage.
+//! This module is kept for reference but should NOT be used in production.
+//!
 //! Stores and retrieves Docker checkpoints from S3.
+
+#![allow(deprecated)]
 
 use crate::checkpoint::CheckpointMetadata;
 use crate::error::{OrchestratorError, Result};
@@ -12,6 +19,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{debug, info};
 
 /// S3 checkpoint metadata (stored alongside checkpoint)
+#[deprecated(since = "0.2.0", note = "Depends on checkpoint.rs which does not work with GPU/TPU. Use stateless failover instead.")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct S3CheckpointMetadata {
     /// Original checkpoint metadata
@@ -32,6 +40,7 @@ pub struct S3CheckpointMetadata {
 }
 
 /// S3 checkpoint store
+#[deprecated(since = "0.2.0", note = "Depends on checkpoint.rs which does not work with GPU/TPU. Use stateless failover instead.")]
 pub struct S3CheckpointStore {
     /// S3 client
     client: Client,

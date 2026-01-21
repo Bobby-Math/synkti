@@ -2,6 +2,14 @@
 //!
 //! Plans optimal task migration from preempted instances to available instances.
 //!
+//! ## Stateless Failover Context
+//!
+//! With the stateless failover approach (no checkpoint/restore), this module is used
+//! to decide **which available instance** should handle requests from a preempted instance.
+//!
+//! The "migration cost" becomes "request rerouting cost" — we're not transferring state,
+//! just redirecting traffic to the instance that can handle it fastest.
+//!
 //! ## Algorithm
 //!
 //! Uses the Kuhn-Munkres bipartite matching algorithm to minimize total migration cost:

@@ -1,6 +1,25 @@
 //! Docker checkpoint management
 //!
+//! ⚠️ **DEPRECATED: Docker checkpoint does NOT work with GPU/TPU containers**
+//!
+//! This module was written for a warm migration approach using `docker checkpoint create`.
+//! However, CRIU (Checkpoint/Restore In Userspace) cannot snapshot GPU/TPU hardware state:
+//! - GPU VRAM and CUDA contexts cannot be serialized
+//! - TPU HBM and matrix units cannot be serialized
+//! - Docker checkpoint will fail or hang on containers actively using accelerators
+//!
+//! **The correct approach for GPU/TPU is stateless failover:**
+//! 1. Drain: Stop accepting new requests
+//! 2. Wait: Let in-flight requests complete
+//! 3. Stop: Gracefully terminate container
+//! 4. Respawn: Start fresh instance, load model from disk/S3
+//!
+//! This module is kept for reference but should NOT be used in production.
+//! Use the drain/failover pattern in `failover.rs` instead.
+//!
 //! Manages Docker container checkpoints for state migration.
+
+#![allow(deprecated)]
 
 use crate::error::{OrchestratorError, Result};
 use serde::{Deserialize, Serialize};
@@ -10,6 +29,7 @@ use std::process::Command as SyncCommand;
 use tracing::{debug, info, warn};
 
 /// Checkpoint metadata
+#[deprecated(since = "0.2.0", note = "Docker checkpoint does not work with GPU/TPU. Use stateless failover instead.")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckpointMetadata {
     /// Container ID
@@ -35,6 +55,7 @@ pub struct CheckpointMetadata {
 }
 
 /// Docker checkpoint manager
+#[deprecated(since = "0.2.0", note = "Docker checkpoint does not work with GPU/TPU. Use stateless failover instead.")]
 pub struct DockerCheckpoint {
     /// Docker socket path
     socket_path: String,
@@ -308,6 +329,7 @@ impl Default for DockerCheckpoint {
 }
 
 /// Checkpoint manager with S3 integration
+#[deprecated(since = "0.2.0", note = "Docker checkpoint does not work with GPU/TPU. Use stateless failover instead.")]
 pub struct CheckpointManager {
     docker: DockerCheckpoint,
 }
