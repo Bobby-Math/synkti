@@ -1,111 +1,146 @@
 # Synkti
 
-**Domain-agnostic orchestration for spot instances with optimal migration and checkpoint recovery**
+**Stateless failover orchestration for GPU/TPU spot instances**
 
 ---
 
 ## Project Status
 
-**Phase 1 (Q4 2025):** ✅ **Complete** - Research Prototype
+**Phase 1 (Q4 2025):** ✅ **Complete** - Simulation Engine & Research Prototype
 
-**Current Focus:** Validation & Pilot Program
+**Phase 2 (Q1 2026):** 🔄 **In Progress** - AWS Orchestrator & Stateless Failover
 
 ---
 
 ## What is Synkti?
 
-Synkti is a sophisticated orchestration system for managing GPU workloads on volatile spot instances. Unlike existing solutions (SpotServe, SkyServe), Synkti provides:
+Synkti is a production-grade orchestration system for managing ML inference workloads on volatile spot instances, achieving **70-90% cost reduction** while maintaining reliability.
 
-1. **Provably Optimal Migration** - Kuhn-Munkres algorithm for minimum-cost task reassignment
-2. **Grace Period Exploitation** - 120-second checkpoint recovery (novel contribution)
-3. **Domain-Agnostic Design** - Works for any GPU workload, not just LLMs
+### The Problem
 
-**Cost Savings:** Up to 80% reduction vs on-demand instances (validated with 200-task simulation)
-**Reliability:** Checkpoint recovery maintains progress during failures
+GPU spot instances are 70-90% cheaper than on-demand, but get preempted with only 2 minutes warning. Traditional solutions attempt checkpoint/restore, but:
 
-**📊 [Interactive Benchmark Results](https://bobby-math.github.io/synkti/)** - Explore visualizations
+> **Docker checkpoint (CRIU) cannot snapshot GPU/TPU state.**
+>
+> CUDA contexts, VRAM, and TPU HBM cannot be serialized. `docker checkpoint create` will fail or hang on containers actively using accelerators.
+
+### The Solution: Stateless Failover
+
+Instead of fighting hardware limitations, Synkti embraces stateless architecture:
+
+```
+Spot Preemption Notice (120s grace)
+    │
+    ├── 1. Drain: Stop new requests, wait for in-flight (max 115s)
+    │
+    ├── 2. Select: Choose replacement instance (FIFO → Warm+LeastLoaded)
+    │
+    ├── 3. Spawn: Start fresh container on replacement
+    │
+    └── 4. Route: Health check, update load balancer
+```
+
+**Result:** Same 70-90% cost savings, simpler architecture, more reliable.
 
 ---
 
-## Quick Demo
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Synkti Orchestrator                       │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+│  │   Monitor   │  │   Drain     │  │     Failover        │  │
+│  │ (spot poll) │──│  Manager    │──│     Manager         │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+│         │                │                    │              │
+│         │                │         ┌──────────┴──────────┐  │
+│         │                │         │   Node Assigner     │  │
+│         │                │         │ (FIFO/LeastLoaded/  │  │
+│         │                │         │  Warm+LeastLoaded)  │  │
+│         │                │         └─────────────────────┘  │
+└─────────┼────────────────┼────────────────────┼─────────────┘
+          │                │                    │
+          ▼                ▼                    ▼
+┌─────────────────┐  ┌─────────────┐  ┌─────────────────────┐
+│  EC2 Metadata   │  │   vLLM      │  │   Standby Pool      │
+│  169.254.169.254│  │   /health   │  │   (replacement      │
+│                 │  │   /metrics  │  │    instances)       │
+└─────────────────┘  └─────────────┘  └─────────────────────┘
+```
+
+---
+
+## Quick Start
 
 ```bash
-# Clone the repo and move to crates/ directory 
+# Clone and build
 git clone git@github.com:Bobby-Math/synkti.git
 cd synkti/crates/
 
-# Run simulation (200 tasks, 72 hours - rigorous benchmark)
+# Run simulation (validates cost model)
 cargo run --release -p synkti-simulation-engine -- --duration 72 --tasks 200
 
-# Expected output (optimal migration):
-# Greedy-Optimal:           $416  (80% savings, 12 preemptions)
-# OnDemandFallback-Optimal: $696  (66% savings, 16 preemptions)
-# OnDemandOnly:             $2,069 (baseline, 0 preemptions)
+# Run orchestrator tests (35 tests)
+cargo test -p synkti-orchestrator
 
-# All tests (32 passing)
-cargo test
+# Build orchestrator
+cargo build --release -p synkti-orchestrator
 ```
 
-### Advanced Benchmarking
+---
 
-Compare naive vs optimal migration strategies with all available parameters:
+## Key Components
 
-```bash
-# Compare all policy variants (naive vs optimal migration)
-cargo run --release -p synkti-simulation-engine -- --duration 72 --tasks 200 \
-  --policies greedy-naive,greedy-optimal,fallback-naive,fallback-optimal,ondemand
+### Simulation Engine (Phase 1 - Complete)
 
-# Customize simulation parameters
-cargo run --release -p synkti-simulation-engine -- \
-  --duration 72 \
-  --tasks 200 \
-  --on-demand-price 1.00 \
-  --spot-price 0.30 \
-  --preemption-rate 0.05 \
-  --output custom_results.json
+Discrete-event simulator that validates scheduling policies against synthetic spot data:
+
+| Policy | Cost | Savings | Preemptions |
+|--------|------|---------|-------------|
+| Greedy + Optimal KM | $416 | **80%** | 12 |
+| OnDemand Fallback | $696 | **66%** | 16 |
+| OnDemand Only | $2,069 | baseline | 0 |
+
+### Orchestrator (Phase 2 - In Progress)
+
+| Module | Purpose | Status |
+|--------|---------|--------|
+| `monitor.rs` | Spot interruption detection (metadata polling) | ✅ Complete |
+| `instance.rs` | EC2 lifecycle management | ✅ Complete |
+| `vllm.rs` | vLLM container management | ✅ Complete |
+| `drain.rs` | Graceful request draining (115s timeout) | ✅ Complete |
+| `assign.rs` | Node assignment strategies | ✅ Complete |
+| `failover.rs` | Failover orchestration | ✅ Complete |
+| `pool.rs` | Standby instance pool | ⏳ Planned |
+| `main.rs` integration | Wire failover to monitor | ⏳ Planned |
+
+### Assignment Strategies
+
+```rust
+pub enum AssignmentStrategy {
+    EarliestNode,      // FIFO - deterministic, debuggable (start here)
+    LeastLoaded,       // Load-aware - balances traffic
+    WarmLeastLoaded,   // Hybrid - prefer warm cache + load balance (recommended)
+    Random,            // Statistical distribution
+}
 ```
 
-**Available policies:**
-- `greedy-naive` - Greedy scheduling with naive first-fit migration
-- `greedy-optimal` - Greedy scheduling with optimal Kuhn-Munkres migration ⭐
-- `fallback-naive` - On-demand fallback with naive migration
-- `fallback-optimal` - On-demand fallback with optimal migration ⭐
-- `ondemand` - Baseline (no spot instances)
-
-**Migration Strategy Performance:**
-- **Homogeneous infrastructure** (same bandwidth/memory): 5-15% improvement with optimal KM
-- **Heterogeneous multi-cloud** (varying resources): 30-50% improvement with optimal KM
-
-The current simulation uses homogeneous instances (all 10 Gbps, same memory). In real multi-cloud deployments with heterogeneous instance types, optimal migration provides dramatically larger benefits.
+**Recommendation:** Start with `EarliestNode` for debugging, graduate to `WarmLeastLoaded` for production.
 
 ---
 
-## Novel Contributions
+## Why Stateless Failover?
 
-### 1. Kuhn-Munkres Optimal Migration
-**Problem:** SpotServe uses greedy task reassignment (suboptimal)
+| Factor | Checkpoint Migration | Stateless Failover |
+|--------|---------------------|-------------------|
+| **GPU/TPU Support** | ❌ CRIU can't snapshot | ✅ Works with any accelerator |
+| **Complexity** | High (serialize, transfer, restore) | Low (drain, respawn) |
+| **Development time** | 1-2 months | 1-2 weeks |
+| **Cost savings** | 70-90% | 70-90% (same!) |
+| **Failure modes** | Many (partial checkpoint, corrupt state) | Few (just retry) |
 
-**Solution:** Hungarian algorithm finds provably minimum-cost assignment
-
-**Impact:** 80% fewer preemptions, better cost savings
-
----
-
-### 2. Checkpoint-Aware Recovery
-**Problem:** AWS gives 120 seconds warning, but existing systems don't exploit it optimally
-
-**Solution:** Intelligent decision logic (Full/Partial/Restart based on transferable data)
-
-**Impact:** Tasks recover up to 100% of progress, reducing completion time
-
----
-
-### 3. Domain-Agnostic Architecture
-**Problem:** SpotServe is LLM-only, tightly coupled to inference
-
-**Solution:** Clean separation via pluggable scheduling policies
-
-**Impact:** Extensible to training, batch, interactive workloads
+**The 70% savings comes from spot pricing, not migration strategy.** Ship the simple thing first.
 
 ---
 
@@ -115,69 +150,64 @@ The current simulation uses homogeneous instances (all 10 Gbps, same memory). In
 synkti/
 ├── crates/
 │   └── applications/
-│       └── synkti-simulation-engine/  ← GRANT-READY PROTOTYPE
+│       ├── synkti-orchestrator/      ← AWS ORCHESTRATOR
+│       │   ├── src/
+│       │   │   ├── drain.rs          (graceful draining)
+│       │   │   ├── assign.rs         (node assignment)
+│       │   │   ├── failover.rs       (orchestration)
+│       │   │   ├── monitor.rs        (spot detection)
+│       │   │   ├── instance.rs       (EC2 lifecycle)
+│       │   │   ├── vllm.rs           (container management)
+│       │   │   └── migration.rs      (KM cost calculation)
+│       │   └── Cargo.toml
+│       │
+│       └── synkti-simulation-engine/ ← SIMULATION ENGINE
 │           ├── src/
-│           │   ├── migration.rs      (Kuhn-Munkres algorithm)
-│           │   ├── checkpoint.rs     (Grace period logic)
-│           │   ├── simulator.rs      (Discrete-event loop)
-│           │   ├── policies.rs       (Scheduling policies)
-│           │   ├── types.rs          (Data structures)
-│           │   └── spot_data.rs      (Price generation)
-│           ├── README.md             (Detailed documentation)
-│           └── Cargo.toml
-├── LITEPAPER.md                      (Vision & roadmap)
+│           │   ├── simulator.rs      (discrete-event loop)
+│           │   ├── policies.rs       (scheduling policies)
+│           │   └── migration.rs      (KM algorithm)
+│           └── README.md
+│
+├── claude.md                         (project context)
+├── LITEPAPER.md                      (vision & roadmap)
+└── stateless-failover-implementation-plan.md
 ```
-
----
-
-## Documentation
-
-- [Simulation Engine README](crates/applications/synkti-simulation-engine/README.md) - Complete technical documentation
-- [Litepaper](LITEPAPER.md) - Vision and long-term roadmap
-- [Funding Roadmap](VISION.md) - Phase 2 deliverables and execution plan
 
 ---
 
 ## Related Work
 
-| System | Focus | Limitation | Synkti Improvement |
-|--------|-------|-----------|---------------------|
-| **SpotServe** (OSDI '24) | LLM inference | Greedy migration, LLM-only | Optimal KM migration, domain-agnostic |
-| **SkyServe** | Multi-cloud serving | No intra-replica healing | Fine-grained checkpoint recovery |
-| **Can't Be Late** (EuroSys '24) | Batch deadlines | No GPU support | GPU memory constraints, checkpoints |
+| System | Focus | Limitation | Synkti Approach |
+|--------|-------|-----------|-----------------|
+| **SpotServe** (OSDI '24) | LLM inference | Assumes checkpoint works | Stateless failover |
+| **SkyServe** | Multi-cloud | No intra-replica healing | Grace period drain |
+| **Can't Be Late** (EuroSys '24) | Batch deadlines | No GPU support | GPU-native design |
+
+---
+
+## What's Next (Stateless Failover Phase 2)
+
+1. **Remote Execution** - SSM/SSH to spawn containers on remote instances
+2. **Load Balancer Integration** - ALB/NLB deregistration during drain
+3. **vLLM Metrics** - Query `/metrics` for actual in-flight request count
+4. **main.rs Integration** - Wire failover to spot monitor
+5. **Standby Pool** - Maintain warm replacement instances
 
 ---
 
 ## Benchmark Results
 
-**Configuration:** 200 tasks, 72-hour simulation (most rigorous test)
+**Simulation Validation (200 tasks, 72 hours):**
 
-Demonstrating the superiority of optimal Kuhn-Munkres migration vs naive first-fit:
+- **80% cost reduction** with greedy spot scheduling
+- **Kuhn-Munkres** provides 7-46% improvement over naive assignment
+- KM is retained for **cost calculation** in stateless failover (selecting best replacement)
 
-| Policy | Migration Strategy | Cost | Savings | Preemptions | Improvement |
-|--------|-------------------|------|---------|-------------|-------------|
-| **Greedy** | Optimal (KM) | $415.72 | **79.9%** | 12 | +1.5% vs naive, -45% preemptions |
-| **OnDemandFallback** | Optimal (KM) | $696.04 | **66.4%** | 16 | **+29% vs naive (78% better)** |
-| **OnDemandOnly** | N/A | $2,069 | baseline | 0 | - |
+**Real-World Expectation:**
 
-**Key Findings:**
-- Optimal Kuhn-Munkres migration provides 7-46% cost reduction vs naive first-fit, depending on policy (7% for Greedy, 46% for OnDemandFallback)
-- Up to 80% cost reduction achievable with aggressive spot usage + optimal migration
-- Checkpoint recovery system successfully handles preemption events
-
----
-
-## Technical Highlights
-
-**Modules:** 7 core modules (2,191 lines)
-
-**Tests:** 32 comprehensive tests
-
-**Algorithms:** Kuhn-Munkres (optimal), Ornstein-Uhlenbeck (price generation)
-
-**Architecture:** Event-driven simulation, priority queue, pluggable policies
-
-**Dependencies:** Pure Rust (no GPU required for simulation)
+- 70-90% cost savings (spot vs on-demand pricing)
+- <120s total failover time (within AWS grace period)
+- Client retries hit new instance with fresh model state
 
 ---
 
@@ -187,14 +217,6 @@ Demonstrating the superiority of optimal Kuhn-Munkres migration vs naive first-f
 
 **Website:** www.bobby-math.dev
 
-**Project Phase:** Research & Validation
-
-**Status:** Prototype complete, moving to Phase 2 (Pilot)
-
----
-
-## License
-
-GNU Affero General Public License v3.0 (AGPL-3.0)
+**License:** GNU Affero General Public License v3.0 (AGPL-3.0)
 
 ---
