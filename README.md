@@ -199,8 +199,9 @@ synkti/
 **Simulation Validation (200 tasks, 72 hours):**
 
 - **80% cost reduction** with greedy spot scheduling
-- **Kuhn-Munkres** provides 7-46% improvement over naive assignment
-- KM is retained for **cost calculation** in stateless failover (selecting best replacement)
+- **Kuhn-Munkres** provides 7-46% improvement over naive assignment (validated in simulation)
+- **Stateless failover** uses simple heuristics (`WarmLeastLoaded`, `LeastLoaded`) for 1→N selection
+- KM algorithm retained for future N→M batch preemption scenarios
 
 **Real-World Expectation:**
 
