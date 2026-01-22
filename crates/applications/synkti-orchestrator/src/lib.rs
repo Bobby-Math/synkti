@@ -39,12 +39,14 @@
 // Active modules (stateless failover)
 pub mod assign;
 pub mod drain;
+pub mod elb;
 pub mod error;
 pub mod failover;
 pub mod infra;
 pub mod instance;
 pub mod migration;
 pub mod monitor;
+pub mod remote;
 pub mod vllm;
 
 // Deprecated modules (checkpoint-based migration - doesn't work with GPU/TPU)
@@ -61,7 +63,7 @@ pub mod s3_store;
 pub use failover::{FailoverConfig, FailoverManager, FailoverPhaseTimes, FailoverResult};
 
 // Drain management
-pub use drain::{DrainManager, DrainResult, DrainStatus, DEFAULT_DRAIN_TIMEOUT_SECS};
+pub use drain::{DrainManager, DrainResult, DrainStatus, ElbConfig, DEFAULT_DRAIN_TIMEOUT_SECS};
 
 // Assignment strategies
 pub use assign::{
@@ -83,6 +85,12 @@ pub use monitor::{SpotInterruptionNotice, SpotMonitor, GRACE_PERIOD_SECONDS};
 
 // vLLM container management
 pub use vllm::{VllmClient, VllmConfig, VllmContainer};
+
+// Remote execution via SSM
+pub use remote::{CommandResult, CommandStatus, SsmExecutor};
+
+// Load balancer integration
+pub use elb::LoadBalancerManager;
 
 // Migration planning (still useful for cost calculations)
 pub use migration::{MigrationPlanner, MigrationPlan, MigrationTarget, MigrationTask};

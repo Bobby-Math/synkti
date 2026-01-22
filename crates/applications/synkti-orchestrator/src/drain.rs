@@ -7,6 +7,7 @@
 //!
 //! This module manages the drain phase of stateless failover.
 
+use crate::elb::LoadBalancerManager;
 use crate::error::Result;
 use crate::vllm::VllmClient;
 use serde::{Deserialize, Serialize};
@@ -43,6 +44,15 @@ pub struct DrainResult {
     pub instance_id: String,
 }
 
+/// Configuration for load balancer integration
+#[derive(Debug, Clone)]
+pub struct ElbConfig {
+    /// Target group ARN
+    pub target_group_arn: String,
+    /// Port the instance is registered on (if using instance ID + port)
+    pub port: Option<i32>,
+}
+
 /// Manages graceful request draining during failover
 ///
 /// The drain manager coordinates with the vLLM API to:
@@ -52,6 +62,8 @@ pub struct DrainResult {
 pub struct DrainManager {
     /// Timeout for drain operation
     drain_timeout: Duration,
+    /// Optional load balancer configuration
+    elb_config: Option<ElbConfig>,
 }
 
 impl DrainManager {
@@ -62,31 +74,58 @@ impl DrainManager {
 
     /// Create a drain manager with custom timeout
     pub fn with_timeout(drain_timeout: Duration) -> Self {
-        Self { drain_timeout }
+        Self {
+            drain_timeout,
+            elb_config: None,
+        }
+    }
+
+    /// Configure load balancer integration
+    pub fn with_elb(mut self, config: ElbConfig) -> Self {
+        self.elb_config = Some(config);
+        self
     }
 
     /// Signal that an instance is entering drain mode
     ///
-    /// In a production system, this would:
-    /// 1. Update load balancer health check to return unhealthy
-    /// 2. Deregister from target group
-    /// 3. Set instance metadata/tags
+    /// When ELB is configured, this will:
+    /// 1. Deregister the instance from the target group
+    /// 2. Start connection draining (LB stops new connections)
     ///
-    /// For now, we log the intent and return success.
-    /// The actual load balancer integration should be added when deploying with ALB/NLB.
+    /// Without ELB, this just logs the intent.
     pub async fn set_draining(&self, instance_id: &str) -> Result<()> {
         info!(
             instance_id = %instance_id,
             "Marking instance as draining - no new requests will be accepted"
         );
 
-        // TODO: Implement actual load balancer deregistration
-        // - ALB: elasticloadbalancingv2.deregister_targets()
-        // - NLB: elasticloadbalancingv2.deregister_targets()
-        // - DNS: Update Route53 health check
-        //
-        // For MVP, the orchestrator should handle routing at a higher level,
-        // not routing new requests to instances marked as draining.
+        Ok(())
+    }
+
+    /// Signal that an instance is entering drain mode (with load balancer)
+    ///
+    /// This version takes a LoadBalancerManager to deregister from the target group.
+    pub async fn set_draining_with_elb(
+        &self,
+        instance_id: &str,
+        elb_manager: &LoadBalancerManager,
+    ) -> Result<()> {
+        info!(
+            instance_id = %instance_id,
+            "Marking instance as draining - no new requests will be accepted"
+        );
+
+        if let Some(ref config) = self.elb_config {
+            info!(
+                target_group = %config.target_group_arn,
+                "Deregistering instance from load balancer target group"
+            );
+            elb_manager
+                .deregister_target(&config.target_group_arn, instance_id, config.port)
+                .await?;
+        } else {
+            debug!("No ELB config, skipping load balancer deregistration");
+        }
 
         Ok(())
     }
@@ -158,40 +197,55 @@ impl DrainManager {
 
     /// Check if there are still in-flight requests
     ///
-    /// This queries vLLM's metrics or health endpoint to determine
+    /// This queries vLLM's metrics endpoint to determine
     /// if requests are still being processed.
     ///
     /// Returns:
     /// - `Ok(true)` if requests are still in-flight
     /// - `Ok(false)` if server is idle
-    /// - `Err` if health check fails
+    /// - `Err` if metrics query fails
     async fn check_inflight_status(&self, vllm_client: &VllmClient) -> Result<bool> {
-        // For MVP, we use health check as proxy for "server is running"
-        // A more sophisticated implementation would query:
-        // - /metrics endpoint for running_requests gauge
-        // - /v1/models for loaded model state
-        //
-        // If the server is healthy, assume it might have in-flight requests.
-        // If unhealthy, assume it's safe to stop.
-        //
-        // TODO: Query vLLM /metrics endpoint for precise request count
-        // Metric: vllm:num_requests_running
-
-        match vllm_client.health_check().await {
+        // Try to get precise request counts from vLLM metrics
+        match vllm_client.is_idle().await {
             Ok(true) => {
-                // Server is healthy - might have in-flight requests
-                // For MVP, we'll use a simple heuristic:
-                // After initial drain signal, wait a short period then assume drained
-                Ok(false) // Conservative: assume no in-flight for faster failover
+                // Server is idle - no in-flight requests
+                debug!("vLLM server is idle (no running or waiting requests)");
+                Ok(false)
             }
             Ok(false) => {
-                // Server is unhealthy - safe to stop
-                Ok(false)
+                // Still has in-flight or waiting requests
+                match (
+                    vllm_client.get_running_requests().await,
+                    vllm_client.get_waiting_requests().await,
+                ) {
+                    (Ok(running), Ok(waiting)) => {
+                        debug!(
+                            running = running,
+                            waiting = waiting,
+                            "vLLM still processing requests"
+                        );
+                        Ok(true)
+                    }
+                    _ => {
+                        // Couldn't get detailed counts, but we know it's not idle
+                        Ok(true)
+                    }
+                }
             }
             Err(e) => {
-                // Can't reach server - safe to stop
-                debug!(error = %e, "Health check failed, assuming drained");
-                Ok(false)
+                // Can't reach server or metrics - check health as fallback
+                debug!(error = %e, "Metrics query failed, falling back to health check");
+                match vllm_client.health_check().await {
+                    Ok(true) => {
+                        // Server is healthy but metrics unavailable
+                        // Conservative: assume might still have requests
+                        Ok(true)
+                    }
+                    Ok(false) | Err(_) => {
+                        // Server is unhealthy or unreachable - safe to stop
+                        Ok(false)
+                    }
+                }
             }
         }
     }
@@ -231,6 +285,60 @@ impl DrainManager {
             status = ?result.status,
             drain_time_secs = result.drain_time_secs,
             "Drain sequence completed"
+        );
+
+        Ok(result)
+    }
+
+    /// Perform full drain sequence with load balancer integration
+    ///
+    /// This version deregisters from the load balancer and waits for
+    /// both LB draining and in-flight requests to complete.
+    pub async fn drain_with_elb(
+        &self,
+        instance_id: &str,
+        vllm_client: &VllmClient,
+        elb_manager: &LoadBalancerManager,
+    ) -> Result<DrainResult> {
+        let start = Instant::now();
+
+        // Step 1: Deregister from load balancer (if configured)
+        self.set_draining_with_elb(instance_id, elb_manager).await?;
+
+        // Step 2: Wait for in-flight requests to complete
+        // Also wait for LB connection draining in parallel
+        let vllm_future = self.wait_for_inflight(vllm_client, self.drain_timeout);
+
+        let elb_future = async {
+            if let Some(ref config) = self.elb_config {
+                // Wait for LB draining to complete (use same timeout)
+                let _ = elb_manager
+                    .wait_for_drained(
+                        &config.target_group_arn,
+                        instance_id,
+                        config.port,
+                        self.drain_timeout,
+                    )
+                    .await;
+            }
+        };
+
+        // Wait for both vLLM drain and ELB drain
+        let (status, _) = tokio::join!(vllm_future, elb_future);
+        let status = status?;
+
+        let drain_time = start.elapsed();
+
+        let result = DrainResult {
+            status,
+            drain_time_secs: drain_time.as_secs_f64(),
+            instance_id: instance_id.to_string(),
+        };
+
+        info!(
+            status = ?result.status,
+            drain_time_secs = result.drain_time_secs,
+            "Drain sequence with ELB completed"
         );
 
         Ok(result)

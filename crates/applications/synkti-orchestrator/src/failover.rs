@@ -26,10 +26,12 @@
 //! - **Health check**: vLLM /health + model loaded before routing
 
 use crate::assign::{AssignmentCandidate, AssignmentStrategy, NodeAssigner, Workload};
-use crate::drain::{DrainManager, DrainResult, DrainStatus};
+use crate::drain::{DrainManager, DrainResult, DrainStatus, ElbConfig};
+use crate::elb::LoadBalancerManager;
 use crate::error::{OrchestratorError, Result};
 use crate::instance::Ec2Instance;
 use crate::monitor::SpotInterruptionNotice;
+use crate::remote::SsmExecutor;
 use crate::vllm::{VllmClient, VllmConfig, VllmContainer};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
@@ -367,6 +369,98 @@ impl FailoverManager {
         let client = VllmClient::new(api_url);
 
         Ok((container, client))
+    }
+
+    /// Spawn a replacement container using SSM remote execution
+    ///
+    /// This actually executes the docker run command on the remote instance
+    /// using AWS Systems Manager (SSM).
+    pub async fn spawn_replacement_with_ssm(
+        &self,
+        instance: &Ec2Instance,
+        ssm: &SsmExecutor,
+    ) -> Result<(VllmContainer, VllmClient)> {
+        info!(
+            instance_id = %instance.id,
+            model = %self.config.vllm_config.model,
+            "Spawning replacement container via SSM"
+        );
+
+        // Create vLLM config for the replacement instance
+        let config = VllmConfig {
+            container_name: Some(format!("vllm-{}", &instance.id[..8.min(instance.id.len())])),
+            ..self.config.vllm_config.clone()
+        };
+
+        // Start the container via SSM
+        let result = ssm.start_vllm_container(&instance.id, &config).await?;
+
+        if !result.is_success() {
+            return Err(OrchestratorError::Docker(format!(
+                "Failed to start container via SSM: {}",
+                result.stderr
+            )));
+        }
+
+        let container = VllmContainer::new(config.clone());
+
+        // Create client for the new instance
+        let api_url = if let Some(ip) = &instance.public_ip {
+            format!("http://{}:{}", ip, config.port)
+        } else if let Some(ip) = &instance.private_ip {
+            format!("http://{}:{}", ip, config.port)
+        } else {
+            return Err(OrchestratorError::Config(
+                "Instance has no IP address".to_string(),
+            ));
+        };
+
+        let client = VllmClient::new(api_url);
+
+        info!(
+            instance_id = %instance.id,
+            container_id = %result.stdout.trim(),
+            "Container started successfully via SSM"
+        );
+
+        Ok((container, client))
+    }
+
+    /// Register the replacement instance with the load balancer
+    ///
+    /// After the replacement is healthy, this adds it to the target group.
+    pub async fn register_replacement(
+        &self,
+        instance: &Ec2Instance,
+        elb_manager: &LoadBalancerManager,
+        elb_config: &ElbConfig,
+    ) -> Result<()> {
+        info!(
+            instance_id = %instance.id,
+            target_group = %elb_config.target_group_arn,
+            "Registering replacement with load balancer"
+        );
+
+        elb_manager
+            .register_target(&elb_config.target_group_arn, &instance.id, elb_config.port)
+            .await?;
+
+        // Wait for the target to become healthy
+        elb_manager
+            .wait_for_healthy(
+                &elb_config.target_group_arn,
+                &instance.id,
+                elb_config.port,
+                self.config.health_check_timeout,
+            )
+            .await?;
+
+        info!(
+            instance_id = %instance.id,
+            "Replacement registered and healthy in load balancer"
+        );
+
+        Ok(())
     }
 
     /// Wait for a replacement instance to be healthy

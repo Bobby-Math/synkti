@@ -17,14 +17,21 @@
 
 use clap::{Parser, Subcommand};
 use futures::StreamExt;
+use std::sync::Arc;
 use std::time::Duration;
 use synkti_orchestrator::{
+    assign::{AssignmentCandidate, AssignmentStrategy, Workload},
     cleanup_stale_owner, create_owner_marker, is_owner, remove_owner_marker, TerraformRunner,
-    instance::{create_ec2_client, InstanceSpec},
+    drain::ElbConfig,
+    elb::LoadBalancerManager,
+    failover::{FailoverConfig, FailoverManager},
+    instance::{create_ec2_client, Ec2Instance, InstanceSpec},
     monitor::{SpotMonitor, GRACE_PERIOD_SECONDS},
+    remote::SsmExecutor,
     vllm::{VllmClient, VllmConfig, VllmContainer},
 };
-use tracing::{error, info};
+use tokio::sync::RwLock;
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 // Context trait for anyhow error handling
@@ -180,6 +187,18 @@ enum Commands {
         /// Infra directory for auto infra (default: ./infra)
         #[arg(long, default_value = "./infra")]
         infra_dir: String,
+
+        /// Assignment strategy for failover (earliest, least-loaded, warm-least-loaded, random)
+        #[arg(long, default_value = "earliest")]
+        assignment_strategy: String,
+
+        /// Target group ARN for load balancer integration
+        #[arg(long)]
+        target_group_arn: Option<String>,
+
+        /// AWS region for SSM and ELB (default: us-east-1)
+        #[arg(long, default_value = "us-east-1")]
+        region: String,
     },
 
     /// Monitor spot instance for interruption notices
@@ -305,6 +324,9 @@ async fn main() -> anyhow::Result<()> {
             auto_infra,
             project,
             infra_dir,
+            assignment_strategy,
+            target_group_arn,
+            region,
         } => {
             run_orchestrator(
                 model,
@@ -319,6 +341,9 @@ async fn main() -> anyhow::Result<()> {
                 auto_infra,
                 project,
                 infra_dir,
+                assignment_strategy,
+                target_group_arn,
+                region,
             )
             .await
         }
@@ -441,6 +466,7 @@ async fn launch_instance(
 }
 
 /// Run the orchestrator with vLLM and spot monitoring
+#[allow(clippy::too_many_arguments)]
 async fn run_orchestrator(
     model: String,
     model_s3: Option<String>,
@@ -454,6 +480,9 @@ async fn run_orchestrator(
     auto_infra: bool,
     project: Option<String>,
     infra_dir: String,
+    assignment_strategy: String,
+    target_group_arn: Option<String>,
+    region: String,
 ) -> anyhow::Result<()> {
     // Handle auto-infra setup (RAII pattern)
     let _infra_guard = if auto_infra {
@@ -491,6 +520,22 @@ async fn run_orchestrator(
     }
     info!("🔌 Port: {}", port);
 
+    // Parse assignment strategy
+    let strategy = match assignment_strategy.as_str() {
+        "earliest" | "fifo" => AssignmentStrategy::EarliestNode,
+        "least-loaded" => AssignmentStrategy::LeastLoaded,
+        "warm-least-loaded" | "warm" => AssignmentStrategy::WarmLeastLoaded,
+        "random" => AssignmentStrategy::Random,
+        _ => {
+            warn!(
+                "Unknown assignment strategy '{}', defaulting to earliest",
+                assignment_strategy
+            );
+            AssignmentStrategy::EarliestNode
+        }
+    };
+    info!("📋 Assignment strategy: {:?}", strategy);
+
     // Download model from S3 if specified
     let actual_model = if let Some(s3_path) = model_s3 {
         info!("📥 Downloading model from S3...");
@@ -515,8 +560,31 @@ async fn run_orchestrator(
         config = config.with_container_name(name);
     }
 
+    // Create FailoverManager with configuration
+    let failover_config = FailoverConfig::default()
+        .with_strategy(strategy)
+        .with_vllm_config(config.clone());
+    let failover_manager = Arc::new(FailoverManager::with_config(failover_config));
+
+    // Setup AWS clients for SSM and ELB integration
+    let aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .region(aws_config::Region::new(region.clone()))
+        .load()
+        .await;
+    let ssm_executor = Arc::new(SsmExecutor::from_config(&aws_config).await);
+    let elb_manager = Arc::new(LoadBalancerManager::from_config(&aws_config).await);
+
+    // Optional ELB configuration
+    let elb_config = target_group_arn.map(|arn| {
+        info!("🔄 Load balancer integration enabled: {}", arn);
+        ElbConfig {
+            target_group_arn: arn,
+            port: Some(port as i32),
+        }
+    });
+
     // Start vLLM container
-    let mut vllm = VllmContainer::new(config);
+    let mut vllm = VllmContainer::new(config.clone());
     vllm.start().await?;
 
     let api_url = vllm.api_url();
@@ -535,11 +603,21 @@ async fn run_orchestrator(
     let monitor = SpotMonitor::with_interval(std::time::Duration::from_secs(monitor_interval));
 
     info!("👀 Monitoring spot instance for interruptions ({}s interval)", monitor_interval);
+    info!("🔄 Stateless failover enabled with {:?} strategy", strategy);
+
+    // Shared state for candidate instances (would be populated by EC2 discovery in production)
+    let candidates: Arc<RwLock<Vec<Ec2Instance>>> = Arc::new(RwLock::new(Vec::new()));
 
     // Clone for the monitoring task
-    let _vllm_container_id = vllm.container_id().unwrap_or("").to_string();
+    let failover_manager_clone = failover_manager.clone();
+    let ssm_executor_clone = ssm_executor.clone();
+    let elb_manager_clone = elb_manager.clone();
+    let elb_config_clone = elb_config.clone();
+    let candidates_clone = candidates.clone();
+    let model_clone = model.clone();
+    let api_url_clone = api_url.clone();
 
-    // Spawn spot monitoring task
+    // Spawn spot monitoring task with failover integration
     let mut monitor_task = tokio::spawn(async move {
         let mut stream = monitor.monitor_stream();
         while let Some(notice) = stream.next().await {
@@ -551,14 +629,64 @@ async fn run_orchestrator(
                     );
                     info!("📍 Action time: {}", notice.time);
 
-                    // TODO: Trigger checkpoint and migration
-                    // For now, just log
                     if notice.seconds_until_action <= GRACE_PERIOD_SECONDS {
-                        info!("⏱️  Within grace period, initiating checkpoint...");
-                        // checkpoint_container(&vllm_container_id, checkpoint_id).await?;
+                        info!("⏱️  Within grace period, initiating stateless failover...");
+
+                        // Get current instance info from metadata
+                        let current_instance = match get_current_instance_info().await {
+                            Ok(instance) => instance,
+                            Err(e) => {
+                                error!("Failed to get current instance info: {}", e);
+                                continue;
+                            }
+                        };
+
+                        // Create vLLM client for the current instance
+                        let vllm_client = VllmClient::new(&api_url_clone);
+
+                        // Get candidate instances
+                        let instances = candidates_clone.read().await;
+                        let candidate_refs: Vec<AssignmentCandidate> =
+                            instances.iter().map(AssignmentCandidate::new).collect();
+
+                        // Create workload (estimated memory for the model)
+                        let workload = Workload::new(&model_clone, 8000.0);
+
+                        // Execute failover
+                        let result = failover_manager_clone
+                            .handle_preemption(
+                                &notice,
+                                &current_instance,
+                                &vllm_client,
+                                &candidate_refs,
+                                &workload,
+                            )
+                            .await;
+
+                        if result.success {
+                            info!(
+                                "✅ Failover completed successfully in {:.2}s",
+                                result.total_time_secs
+                            );
+                            info!("   Drain: {:.2}s", result.phase_times.drain_secs);
+                            info!("   Select: {:.2}s", result.phase_times.select_secs);
+                            info!("   Spawn: {:.2}s", result.phase_times.spawn_secs);
+                            info!(
+                                "   Health check: {:.2}s",
+                                result.phase_times.health_check_secs
+                            );
+                            if let Some(ref replacement_id) = result.replacement_instance_id {
+                                info!("   Replacement: {}", replacement_id);
+                            }
+                        } else {
+                            error!(
+                                "❌ Failover failed: {}",
+                                result.error.unwrap_or_else(|| "Unknown error".to_string())
+                            );
+                        }
                     }
                 }
-                _ => info!("Spot notice: {:?}", notice.action),
+                _ => debug!("Spot notice: {:?}", notice.action),
             }
         }
     });
@@ -824,4 +952,106 @@ async fn download_model_from_s3(s3_path: &str) -> anyhow::Result<String> {
     }
 
     Ok(local_dir)
+}
+
+/// Get current EC2 instance information from instance metadata
+async fn get_current_instance_info() -> anyhow::Result<Ec2Instance> {
+    use std::collections::HashMap;
+
+    // IMDSv2: Get token first
+    let client = reqwest::Client::new();
+    let token = client
+        .put("http://169.254.169.254/latest/api/token")
+        .header("X-aws-ec2-metadata-token-ttl-seconds", "60")
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    // Get instance ID
+    let instance_id = client
+        .get("http://169.254.169.254/latest/meta-data/instance-id")
+        .header("X-aws-ec2-metadata-token", &token)
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    // Get instance type
+    let instance_type = client
+        .get("http://169.254.169.254/latest/meta-data/instance-type")
+        .header("X-aws-ec2-metadata-token", &token)
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    // Get local IPv4 (private IP)
+    let private_ip = client
+        .get("http://169.254.169.254/latest/meta-data/local-ipv4")
+        .header("X-aws-ec2-metadata-token", &token)
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    // Get public IPv4 (may not exist)
+    let public_ip = client
+        .get("http://169.254.169.254/latest/meta-data/public-ipv4")
+        .header("X-aws-ec2-metadata-token", &token)
+        .send()
+        .await
+        .ok()
+        .and_then(|r| {
+            if r.status().is_success() {
+                Some(r)
+            } else {
+                None
+            }
+        });
+
+    let public_ip = match public_ip {
+        Some(r) => Some(r.text().await.unwrap_or_default()),
+        None => None,
+    };
+
+    // Estimate GPU memory based on instance type
+    let gpu_memory_gb = estimate_gpu_memory(&instance_type);
+
+    Ok(Ec2Instance {
+        id: instance_id,
+        instance_type,
+        state: synkti_orchestrator::instance::InstanceState::Running,
+        public_ip,
+        private_ip: Some(private_ip),
+        launch_time: chrono::Utc::now(), // Approximate, could fetch from metadata
+        gpu_memory_gb,
+        network_bandwidth_gbps: 10.0, // Approximate
+        gpu_memory_used_mb: 0.0,
+        tags: HashMap::new(),
+    })
+}
+
+/// Estimate GPU memory based on instance type
+fn estimate_gpu_memory(instance_type: &str) -> f64 {
+    match instance_type {
+        // G4dn instances (T4 GPU - 16GB)
+        t if t.starts_with("g4dn") => 16.0,
+        // G5 instances (A10G GPU - 24GB)
+        t if t.starts_with("g5") => 24.0,
+        // G6 instances (L4 GPU - 24GB)
+        t if t.starts_with("g6") => 24.0,
+        // P3 instances (V100 GPU - 16/32GB)
+        t if t.starts_with("p3.2") => 16.0,
+        t if t.starts_with("p3.8") => 64.0,  // 4x16GB
+        t if t.starts_with("p3.16") => 128.0, // 8x16GB
+        t if t.starts_with("p3dn") => 256.0, // 8x32GB
+        // P4 instances (A100 GPU - 40/80GB)
+        t if t.starts_with("p4d") => 320.0, // 8x40GB
+        t if t.starts_with("p4de") => 640.0, // 8x80GB
+        // P5 instances (H100 GPU - 80GB)
+        t if t.starts_with("p5") => 640.0, // 8x80GB
+        // Default
+        _ => 16.0,
+    }
 }

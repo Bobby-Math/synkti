@@ -20,6 +20,8 @@ base64 = "0.22"
 aws-config = { version = "1.5", features = ["behavior-version-latest"] }
 aws-sdk-ec2 = "1.72"
 aws-sdk-s3 = "1.68"
+aws-sdk-ssm = "1.60"
+aws-sdk-elasticloadbalancingv2 = "1.58"
 aws-types = "1.3"
 
 # HTTP client

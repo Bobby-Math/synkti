@@ -422,6 +422,108 @@ impl VllmClient {
         let models: ModelsResponse = response.json().await?;
         Ok(models.data.into_iter().map(|m| m.id).collect())
     }
+
+    /// Get raw Prometheus metrics from vLLM
+    ///
+    /// vLLM exposes metrics at `/metrics` in Prometheus format.
+    pub async fn get_metrics(&self) -> Result<String> {
+        let url = format!("{}/metrics", self.base_url);
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(OrchestratorError::Http)?;
+
+        if !response.status().is_success() {
+            return Err(OrchestratorError::Docker(format!(
+                "Failed to get metrics: status {}",
+                response.status()
+            )));
+        }
+
+        Ok(response.text().await?)
+    }
+
+    /// Get the number of currently running requests
+    ///
+    /// Parses the `vllm:num_requests_running` metric from Prometheus output.
+    /// Returns 0 if the metric is not found or cannot be parsed.
+    pub async fn get_running_requests(&self) -> Result<u32> {
+        let metrics = match self.get_metrics().await {
+            Ok(m) => m,
+            Err(_) => return Ok(0), // Assume no requests if we can't get metrics
+        };
+
+        // Parse Prometheus format: vllm:num_requests_running{...} VALUE
+        // Also try: vllm_num_requests_running (older format)
+        for line in metrics.lines() {
+            let line = line.trim();
+
+            // Skip comments and empty lines
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            // Check for running requests metric
+            if line.starts_with("vllm:num_requests_running")
+                || line.starts_with("vllm_num_requests_running")
+            {
+                // Extract the value (last space-separated token)
+                if let Some(value_str) = line.split_whitespace().last() {
+                    if let Ok(value) = value_str.parse::<f64>() {
+                        return Ok(value as u32);
+                    }
+                }
+            }
+        }
+
+        // Metric not found, assume no running requests
+        Ok(0)
+    }
+
+    /// Get the number of waiting requests (queue depth)
+    ///
+    /// Parses the `vllm:num_requests_waiting` metric from Prometheus output.
+    pub async fn get_waiting_requests(&self) -> Result<u32> {
+        let metrics = match self.get_metrics().await {
+            Ok(m) => m,
+            Err(_) => return Ok(0),
+        };
+
+        for line in metrics.lines() {
+            let line = line.trim();
+
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            if line.starts_with("vllm:num_requests_waiting")
+                || line.starts_with("vllm_num_requests_waiting")
+            {
+                if let Some(value_str) = line.split_whitespace().last() {
+                    if let Ok(value) = value_str.parse::<f64>() {
+                        return Ok(value as u32);
+                    }
+                }
+            }
+        }
+
+        Ok(0)
+    }
+
+    /// Check if the server is idle (no running or waiting requests)
+    pub async fn is_idle(&self) -> Result<bool> {
+        let running = self.get_running_requests().await?;
+        let waiting = self.get_waiting_requests().await?;
+        Ok(running == 0 && waiting == 0)
+    }
+
+    /// Get base URL
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
 }
 
 #[cfg(test)]
