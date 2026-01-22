@@ -152,35 +152,63 @@ Synkti classifies workload + selects optimal chip
 
 ## System Architecture
 
-Synkti's architecture implements **two-layer abstraction** to democratize access to volatile compute:
+Synkti's architecture implements **peer-to-peer choreography** rather than centralized orchestration. Each node is autonomous, self-governing, and discovers peers dynamically.
 
-### Layer 1: Volatility Abstraction (Compute & Execution)
+### The P2P Philosophy: Choreography vs Orchestration
+
+**Traditional Approach (Orchestration):** A central control plane coordinates all nodes like a symphony conductor. Single point of failure, requires dedicated infrastructure.
+
+**Synkti Approach (Choreography):** Each node runs its own orchestrator and coordinates with peers through discovery. Like a flock of birds—no leader, yet perfectly coordinated.
+
+### The Five Selfs
+
+Every Synkti node embodies five autonomous capabilities:
+
+| Capability | Description | Implementation |
+|------------|-------------|----------------|
+| **Self-Aware** | Knows its own resources, state, and health | EC2 metadata, GPU monitoring |
+| **Self-Monitoring** | Detects spot interruption signals in real-time | IMDSv2 polling (every 2 seconds) |
+| **Self-Healing** | Initiates failover automatically on preemption | Drain → Select → Spawn → Route |
+| **Self-Organizing** | Discovers and joins peer networks | EC2 tags (Phase 2), libp2p (Phase 3) |
+| **Self-Optimizing** | Chooses optimal replacement via algorithms | Kuhn-Munkres migration, LeastLoaded selection |
+
+### Layer 1: Node Autonomy (Compute & Execution)
+
+**Each Synkti node runs:**
+- **Synkti Orchestrator** (Rust) - Local decision-making, peer discovery, failover coordination
+- **Application Runtime** - Your workload (vLLM, TGI, batch jobs, etc.)
 
 **Heterogeneous spot instances from:**
 - Traditional cloud providers (AWS, GCP, Azure)
 - Decentralized networks (Bittensor, Akash)
 - Independent providers (Vast.ai, RunPod)
 
-**Each instance runs:**
-- **Synkti Data Plane** (Rust agent) - Executes tasks, reports health, handles local checkpointing
-- **Application Runtime** - Your workload (ML models, batch jobs, etc.)
-
-**What this layer does:** Makes volatile resources feel reliable through optimal migration and checkpoint recovery.
+**What this layer does:** Makes each node independently capable of survival—no external coordinator needed.
 
 ---
 
-### Layer 2: Application Abstraction (Orchestrator Intelligence)
+### Layer 2: Peer Discovery (Network Formation)
 
-**Synkti Orchestrator** - The control plane that understands your workload:
+**How nodes find each other:**
 
-1. **Application-Aware Scheduling** - Different strategies for ML inference vs batch vs streaming
-2. **Predictive Preemption Management** - Forecasts failures before they occur
-3. **Workload-Specific Migration** - Knows how to move your application safely (model weights, KV cache, job state)
-4. **SLA-Driven Policies** - Optimizes for your latency/cost/reliability requirements
+| Phase | Discovery Method | Scope |
+|-------|-----------------|-------|
+| **Phase 2 (AWS)** | EC2 tag-based discovery | Single cloud, same region |
+| **Phase 3 (DePIN)** | libp2p (mDNS + Kademlia DHT) | Multi-cloud, global |
 
-**What this layer does:** Domain-specific orchestration that maximizes spot usage while meeting application SLAs.
+**AWS Implementation (Phase 2):**
+- Nodes tag themselves: `SynktiCluster=<cluster-name>`, `SynktiRole=worker`
+- Nodes query EC2 for peers with matching tags
+- Background refresh keeps peer list current (30s interval)
+- No dedicated control plane infrastructure required
 
-**Why this matters:** Current DePIN providers (Akash, io.net) give you raw compute. You still handle deployment, failures, and optimization. **Synkti gives you application-aware orchestration**—describe your workload, get optimal deployment automatically.
+**libp2p Implementation (Phase 3):**
+- mDNS for local network discovery (low latency, no config)
+- Kademlia DHT for global peer discovery
+- No cloud API dependency—works anywhere
+- Enables true multi-cloud and DePIN deployments
+
+**Why P2P matters:** Current DePIN providers (Akash, io.net) give you raw compute. You still handle deployment, failures, and optimization. **Synkti gives each node the intelligence to self-heal**—no central coordinator to fail, scale, or pay for.
 
 ---
 
@@ -223,18 +251,19 @@ Synkti's architecture implements **two-layer abstraction** to democratize access
 
 ### Phase 2: Production MVP + Research Validation (6 Months, Grant-Funded)
 
-**Objective:** Deploy production system with Level 3 Prognostics Engine, validated across 243 scenarios.
+**Objective:** Deploy production P2P system with stateless failover, validated on real AWS workloads.
 
 **Philosophy:** Research → product pipeline means building mathematical foundation first, then applying it to production infrastructure.
 
 **Key Deliverables:**
-1. **State Space Formalization** - Mathematical framework for optimal recovery strategies
-2. **Prognostics Engine** - ARIMA + FFT/DSP for proactive preemption handling (Level 3 orchestration)
-3. **243-Scenario Validation** - Comprehensive testing across model size × network × volatility × context × quantization
-4. **Real Cloud Integration** - AWS Spot API with state space calculator integration
-5. **Production Orchestrator** - Control plane (scheduling, migration, prognostics) + data plane (instance agents for task execution and health monitoring)
-6. **Pilot Program** - 3-5 early adopters running production workloads
-7. **Validation Report** - Prove simulation accuracy <5% error vs reality
+1. **P2P Architecture** - Each node runs orchestrator + worker; no central control plane
+2. **EC2 Tag-Based Discovery** - Nodes self-register and discover peers via `SynktiCluster` tags
+3. **Stateless Failover** - Drain → Select → Spawn → Route pattern (GPU-compatible, no CRIU)
+4. **Real Cloud Integration** - AWS Spot API, SSM remote execution, ELB integration
+5. **Prognostics Engine** - ARIMA + FFT/DSP for proactive preemption handling (Level 3 orchestration)
+6. **243-Scenario Validation** - Comprehensive testing across model size × network × volatility × context × quantization
+7. **Pilot Program** - 3-5 early adopters running production workloads
+8. **Validation Report** - Prove simulation accuracy <5% error vs reality
 
 **Success Metrics:**
 - Simulation accuracy <5% error (not just "roughly matches")
@@ -248,21 +277,34 @@ Synkti's architecture implements **two-layer abstraction** to democratize access
 
 ### Phase 3: Decentralized Protocol (2027)
 
-**Objective:** Transform into permissionless, blockchain-verified compute fabric.
+**Objective:** Transform into permissionless, blockchain-verified compute fabric with global peer discovery.
 
 **Key Milestones:**
-1. **Solana Smart Contracts** - Provider reputation, job settlement, payment rails
-2. **Decentralized Providers** - Integration with Bittensor, Akash, independent nodes
-3. **Proactive Orchestration** - Statistical forecasting and system health analysis to anticipate preemptions before they occur
-4. **Cryptographic Verification** - ZK-proofs or attestations for completed work
-5. **Public Launch** - Permissionless participation for users and providers
-6. **Academic Publication** - Research paper at top-tier systems conference (OSDI/SOSP/EuroSys)
+1. **libp2p Discovery** - Replace EC2 tags with mDNS + Kademlia DHT for cloud-agnostic peer discovery
+2. **Multi-Cloud Support** - Same orchestrator binary runs on AWS, GCP, Azure, bare metal
+3. **Decentralized Providers** - Integration with Bittensor, Akash, independent nodes
+4. **Solana Smart Contracts** - Provider reputation, job settlement, payment rails
+5. **Cryptographic Verification** - ZK-proofs or attestations for completed work
+6. **Public Launch** - Permissionless participation for users and providers
+7. **Academic Publication** - Research paper at top-tier systems conference (OSDI/SOSP/EuroSys)
 
-**Vision:** A global, permissionless marketplace where anyone can contribute compute and anyone can consume it reliably.
+**P2P Evolution:**
+```
+Phase 2 (AWS)              Phase 3 (DePIN)
+┌─────────────┐           ┌─────────────┐
+│ EC2 Tags    │    →      │ libp2p DHT  │
+│ Same region │           │ Global      │
+│ AWS only    │           │ Any cloud   │
+└─────────────┘           └─────────────┘
+```
+
+**Vision:** A global, permissionless mesh where any node can join, discover peers, and self-heal—without central coordination or cloud API dependency.
 
 ## Why Synkti Matters
 
 **Capacity Expansion, Not Just Cost Reduction:** The 2026 compute crisis (Sam Altman) means enterprises need MORE capacity, not just cheaper capacity. Synkti unlocks 4-5x more usable compute from stranded spot inventory—enabling use cases that wouldn't exist otherwise (free tier users, chatbots, experimentation).
+
+**P2P Architecture = Natural Decentralization:** Synkti's choreography-based design (each node self-governing) isn't just an implementation detail—it's the foundation for true decentralization. No central control plane to fail, scale, or pay for. The same architecture that works on AWS spot instances (Phase 2) works on DePIN networks (Phase 3) with only the discovery layer changing.
 
 **Future-Proof for Heterogeneous Chips:** As custom accelerators proliferate (TPU, LPU, Trainium, Groq), domain-agnostic orchestration becomes MORE valuable. Synkti's architecture works across any chip type, making it the intelligent routing layer for the polyglot accelerator future.
 

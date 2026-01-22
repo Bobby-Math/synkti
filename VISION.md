@@ -298,6 +298,28 @@ Decision Logic:
 | `spot_data.rs` | 134 | 2 | Realistic price generation |
 | `main.rs` | 200 | - | CLI interface |
 
+### Phase 2 Progress (In Development 🚧)
+
+**Production Orchestrator (synkti-orchestrator):**
+- 41 tests passing (100% pass rate)
+- P2P architecture with EC2 tag-based peer discovery
+- Stateless failover (Drain → Select → Spawn → Route)
+- vLLM container management and metrics integration
+- AWS SSM remote execution, ELB load balancer integration
+
+**New Modules (Phase 2):**
+
+| Module | Purpose |
+|--------|---------|
+| `discovery.rs` | P2P peer discovery via EC2 tags |
+| `failover.rs` | Stateless failover orchestration |
+| `drain.rs` | Graceful request draining (115s timeout) |
+| `assign.rs` | Node assignment strategies (LeastLoaded, Warm, etc.) |
+| `remote.rs` | SSM-based remote command execution |
+| `elb.rs` | AWS ELB target group management |
+| `vllm.rs` | vLLM container lifecycle and metrics |
+| `monitor.rs` | Spot interruption detection (IMDSv2) |
+
 **Validation Results (200 tasks, 72-hour simulation):**
 
 Demonstrating optimal Kuhn-Munkres migration vs naive first-fit baseline:
@@ -332,16 +354,21 @@ Demonstrating optimal Kuhn-Munkres migration vs naive first-fit baseline:
 
 **Budget:** $45,000 USD (milestone-based)
 
-**Outcome:** Production orchestrator with Level 3 Prognostics Engine, validated across 243 scenarios, with 3-5 pilot users
+**Outcome:** Production P2P orchestrator with stateless failover, validated on real AWS workloads with 3-5 pilot users
 
-**Philosophy:** Phase 2 validates Phase 1 algorithms on real infrastructure while deepening the mathematical foundation. Research components don't delay product—they make validation comprehensive across 243 scenarios instead of just a handful.
+**Philosophy:** Phase 2 validates Phase 1 algorithms on real infrastructure. The architectural pivot to P2P (each node self-governing) eliminates central control plane complexity and naturally aligns with Phase 3 decentralization.
 
-**Key Additions to Original Plan:**
-1. **Month 1 Pure Research:** State space formalization + ARIMA/FFT prognostics foundations
-2. **Prognostics Engine:** Level 3 orchestration (proactive preemption handling, not just reactive)
-3. **243-Scenario Validation:** Multi-dimensional testing across model size × network × volatility × context × quantization
-4. **Personal Compute Equipment:** $3k investment for sustainable simulation capability (mini PC for 24/7 parameter sweeps)
-5. **Comprehensive Validation:** Target <5% error between simulation and reality (not vague claims)
+**Key Achievements (as of January 22, 2026):**
+1. **P2P Architecture:** Each node runs orchestrator + worker; discovers peers via EC2 tags
+2. **Stateless Failover:** Drain → Select → Spawn → Route pattern (GPU-compatible, no CRIU)
+3. **41 Tests Passing:** Production-quality code with comprehensive test coverage
+4. **AWS Integration:** SSM remote execution, ELB target management, IMDSv2 metadata
+
+**Remaining Work:**
+1. **Prognostics Engine:** Level 3 orchestration (proactive preemption handling)
+2. **243-Scenario Validation:** Multi-dimensional testing across model size × network × volatility × context × quantization
+3. **Pilot Program:** 3-5 early adopters running production workloads
+4. **libp2p Planning:** Prepare Phase 3 transition from EC2 tags to global peer discovery
 
 **Detailed breakdown:** See `grants/SOLANA_FOUNDATION.md` and `grants/EMERGENT_VENTURES.md` for complete milestone structure
 

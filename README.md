@@ -168,9 +168,8 @@ synkti/
 │           │   └── migration.rs      (KM algorithm)
 │           └── README.md
 │
-├── claude.md                         (project context)
 ├── LITEPAPER.md                      (vision & roadmap)
-└── stateless-failover-implementation-plan.md
+
 ```
 
 ---
