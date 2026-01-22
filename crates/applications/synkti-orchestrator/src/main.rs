@@ -22,6 +22,7 @@ use std::time::Duration;
 use synkti_orchestrator::{
     assign::{AssignmentCandidate, AssignmentStrategy, Workload},
     cleanup_stale_owner, create_owner_marker, is_owner, remove_owner_marker, TerraformRunner,
+    discovery::{tag_self_as_worker, untag_self_as_worker, DiscoveryConfig, PeerDiscovery},
     drain::ElbConfig,
     elb::LoadBalancerManager,
     failover::{FailoverConfig, FailoverManager},
@@ -199,6 +200,10 @@ enum Commands {
         /// AWS region for SSM and ELB (default: us-east-1)
         #[arg(long, default_value = "us-east-1")]
         region: String,
+
+        /// Cluster name for P2P peer discovery (nodes with same cluster name discover each other)
+        #[arg(long, default_value = "synkti-default")]
+        cluster: String,
     },
 
     /// Monitor spot instance for interruption notices
@@ -327,6 +332,7 @@ async fn main() -> anyhow::Result<()> {
             assignment_strategy,
             target_group_arn,
             region,
+            cluster,
         } => {
             run_orchestrator(
                 model,
@@ -344,6 +350,7 @@ async fn main() -> anyhow::Result<()> {
                 assignment_strategy,
                 target_group_arn,
                 region,
+                cluster,
             )
             .await
         }
@@ -483,6 +490,7 @@ async fn run_orchestrator(
     assignment_strategy: String,
     target_group_arn: Option<String>,
     region: String,
+    cluster: String,
 ) -> anyhow::Result<()> {
     // Handle auto-infra setup (RAII pattern)
     let _infra_guard = if auto_infra {
@@ -573,6 +581,47 @@ async fn run_orchestrator(
         .await;
     let ssm_executor = Arc::new(SsmExecutor::from_config(&aws_config).await);
     let elb_manager = Arc::new(LoadBalancerManager::from_config(&aws_config).await);
+    let ec2_client = aws_sdk_ec2::Client::new(&aws_config);
+
+    // Get current instance info for P2P discovery
+    let current_instance_id = match get_current_instance_id().await {
+        Ok(id) => {
+            info!("🆔 Current instance: {}", id);
+            Some(id)
+        }
+        Err(e) => {
+            warn!("⚠️  Could not get instance ID (not running on EC2?): {}", e);
+            None
+        }
+    };
+
+    // Tag self as Synkti worker for peer discovery
+    if let Some(ref instance_id) = current_instance_id {
+        match tag_self_as_worker(&ec2_client, instance_id, &cluster).await {
+            Ok(()) => info!("🏷️  Tagged as Synkti worker in cluster '{}'", cluster),
+            Err(e) => warn!("⚠️  Failed to tag self: {}", e),
+        }
+    }
+
+    // Setup P2P peer discovery
+    let discovery_config = DiscoveryConfig::new(&cluster)
+        .with_self_instance_id(current_instance_id.clone().unwrap_or_default())
+        .with_refresh_interval(Duration::from_secs(30));
+
+    let peer_discovery = Arc::new(PeerDiscovery::from_config(&aws_config, discovery_config).await);
+
+    // Initial peer discovery
+    match peer_discovery.discover_peers().await {
+        Ok(peers) => info!("🔍 Discovered {} peers in cluster '{}'", peers.len(), cluster),
+        Err(e) => warn!("⚠️  Initial peer discovery failed: {}", e),
+    }
+
+    // Start background peer refresh task
+    let _discovery_task = peer_discovery.clone().start_refresh_task();
+    info!("🔄 P2P peer discovery active (30s refresh)");
+
+    // Get the shared candidates list from discovery
+    let candidates = peer_discovery.peers_ref();
 
     // Optional ELB configuration
     let elb_config = target_group_arn.map(|arn| {
@@ -604,9 +653,7 @@ async fn run_orchestrator(
 
     info!("👀 Monitoring spot instance for interruptions ({}s interval)", monitor_interval);
     info!("🔄 Stateless failover enabled with {:?} strategy", strategy);
-
-    // Shared state for candidate instances (would be populated by EC2 discovery in production)
-    let candidates: Arc<RwLock<Vec<Ec2Instance>>> = Arc::new(RwLock::new(Vec::new()));
+    info!("🌐 P2P Architecture: Each node is self-aware, self-healing, self-governing");
 
     // Clone for the monitoring task
     let failover_manager_clone = failover_manager.clone();
@@ -616,6 +663,8 @@ async fn run_orchestrator(
     let candidates_clone = candidates.clone();
     let model_clone = model.clone();
     let api_url_clone = api_url.clone();
+    let current_instance_id_clone = current_instance_id.clone();
+    let ec2_client_clone = ec2_client.clone();
 
     // Spawn spot monitoring task with failover integration
     let mut monitor_task = tokio::spawn(async move {
@@ -696,11 +745,28 @@ async fn run_orchestrator(
         _ = tokio::signal::ctrl_c() => {
             info!("🛑 Shutting down...");
             monitor_task.abort();
+
+            // Untag self from cluster before shutdown
+            if let Some(ref instance_id) = current_instance_id {
+                info!("🏷️  Removing Synkti worker tags...");
+                if let Err(e) = untag_self_as_worker(&ec2_client, instance_id).await {
+                    warn!("⚠️  Failed to untag self: {}", e);
+                }
+            }
+
             vllm.stop().await?;
             info!("✅ Shutdown complete");
         }
         result = &mut monitor_task => {
             info!("Monitor task ended: {:?}", result);
+
+            // Untag self from cluster
+            if let Some(ref instance_id) = current_instance_id {
+                if let Err(e) = untag_self_as_worker(&ec2_client, instance_id).await {
+                    warn!("⚠️  Failed to untag self: {}", e);
+                }
+            }
+
             vllm.stop().await?;
         }
     }
@@ -952,6 +1018,31 @@ async fn download_model_from_s3(s3_path: &str) -> anyhow::Result<String> {
     }
 
     Ok(local_dir)
+}
+
+/// Get just the current EC2 instance ID from instance metadata
+async fn get_current_instance_id() -> anyhow::Result<String> {
+    let client = reqwest::Client::new();
+
+    // IMDSv2: Get token first
+    let token = client
+        .put("http://169.254.169.254/latest/api/token")
+        .header("X-aws-ec2-metadata-token-ttl-seconds", "60")
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    // Get instance ID
+    let instance_id = client
+        .get("http://169.254.169.254/latest/meta-data/instance-id")
+        .header("X-aws-ec2-metadata-token", &token)
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    Ok(instance_id)
 }
 
 /// Get current EC2 instance information from instance metadata

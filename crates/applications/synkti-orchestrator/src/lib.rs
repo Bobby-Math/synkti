@@ -38,6 +38,7 @@
 
 // Active modules (stateless failover)
 pub mod assign;
+pub mod discovery;
 pub mod drain;
 pub mod elb;
 pub mod error;
@@ -91,6 +92,12 @@ pub use remote::{CommandResult, CommandStatus, SsmExecutor};
 
 // Load balancer integration
 pub use elb::LoadBalancerManager;
+
+// Peer discovery (P2P architecture)
+pub use discovery::{
+    tag_self_as_worker, untag_self_as_worker, DiscoveryConfig, PeerDiscovery,
+    DEFAULT_CLUSTER_TAG_KEY, DEFAULT_ROLE_TAG_KEY, ROLE_WORKER,
+};
 
 // Migration planning (still useful for cost calculations)
 pub use migration::{MigrationPlanner, MigrationPlan, MigrationTarget, MigrationTask};
