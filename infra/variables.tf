@@ -18,7 +18,7 @@ variable "project_name" {
 }
 
 variable "worker_count" {
-  description = "Number of GPU worker instances to create via Terraform (use 0 to launch via synkti CLI)"
+  description = "DEPRECATED: Workers are now launched via synkti CLI (AWS SDK) - see launch_worker_command output"
   type        = number
   default     = 0
 

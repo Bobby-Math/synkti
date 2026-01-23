@@ -40,6 +40,12 @@ data "aws_ami" "al2023" {
   }
 }
 
+# Get ECS-optimized GPU AMI from SSM (has NVIDIA drivers for G4/G5 instances)
+# Uses SSM parameter which is more reliable than AMI name filtering
+data "aws_ssm_parameter" "ecs_gpu_ami" {
+  name = "/aws/service/ecs/optimized-ami/amazon-linux-2023/gpu/recommended/image_id"
+}
+
 # Get default VPC
 data "aws_vpc" "default" {
   default = true
@@ -290,40 +296,6 @@ resource "aws_vpc_security_group_egress_rule" "worker_all_outbound" {
 
 # --- EC2 Instances ---
 
-# GPU Workers (optional - can also launch via synkti CLI)
-# In P2P architecture, all nodes are workers that self-govern
-resource "aws_instance" "gpu_worker" {
-  count         = var.worker_count
-  instance_type = var.worker_instance_type
-  ami           = var.worker_ami_id != "" ? var.worker_ami_id : data.aws_ami.al2023.id
-
-  iam_instance_profile = aws_iam_instance_profile.worker.name
-  vpc_security_group_ids = [aws_security_group.worker.id]
-
-  # GitOps: Auto-install and auto-start Synkti on boot
-  user_data = templatefile("${path.module}/user-data.sh", {
-    project_name           = var.project_name
-    models_bucket          = aws_s3_bucket.models.id
-    region                 = var.aws_region
-    synkti_binary_s3_path = var.synkti_binary_s3_path != "" ? var.synkti_binary_s3_path : "s3://${aws_s3_bucket.models.id}/bin/synkti"
-    model_s3_path          = var.model_s3_path != "" ? var.model_s3_path : "s3://${aws_s3_bucket.models.id}/qwen2.5-7b/"
-    huggingface_model      = var.huggingface_model_id
-  })
-
-  tags = {
-    Name      = "${var.project_name}-worker-${count.index}"
-    ManagedBy = "Synkti"
-    Project   = var.project_name
-    Role      = "Worker"
-    SynktiCluster = var.project_name
-    SynktiRole = "worker"
-  }
-
-  # Wait for SSM to be ready before considering this instance created
-  depends_on = [
-    aws_iam_role_policy_attachment.worker_ssm,
-    aws_iam_role_policy_attachment.worker_s3_read,
-    aws_iam_role_policy_attachment.worker_ec2,
-    aws_iam_role_policy_attachment.worker_s3_full,
-  ]
-}
+# Note: Spot instances are now managed via the synkti CLI using AWS SDK
+# Use: synkti worker launch --project-name <project> --instance-type g4dn.xlarge
+# This avoids terraform state issues with spot instances (can't be stopped)

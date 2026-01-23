@@ -1,10 +1,5 @@
 # Output values for Synkti infrastructure (P2P Architecture)
 
-output "worker_instance_ids" {
-  description = "GPU worker instance IDs (created via Terraform)"
-  value       = aws_instance.gpu_worker[*].id
-}
-
 output "worker_role_name" {
   description = "Worker IAM role name"
   value       = aws_iam_role.worker.name
@@ -41,10 +36,12 @@ output "region" {
 }
 
 output "launch_worker_command" {
-  description = "Example synkti launch command using Terraformed resources"
+  description = "Command to launch a worker instance via synkti CLI"
   value       = <<-EOT
-    # Launch additional workers via synkti CLI
-    synkti --project-name ${var.project_name}
+    # Launch workers via synkti CLI (AWS SDK - no terraform state issues)
+    synkti --project-name ${var.project_name} worker launch --instance-type ${var.worker_instance_type}
+    synkti --project-name ${var.project_name} worker list
+    synkti --project-name ${var.project_name} worker terminate <instance-id>
     EOT
 }
 
@@ -53,5 +50,5 @@ output "upload_model_command" {
   value       = <<-EOT
     # Upload model from HuggingFace to permanent S3 storage
     ./scripts/upload-model.sh --project-name ${var.project_name} --model Qwen/Qwen2.5-7B-Instruct
-  EOT
+    EOT
 }
