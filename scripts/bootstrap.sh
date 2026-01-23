@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "All resources are named based on project_name:"
       echo "  S3: ${PROJECT_NAME}-models, ${PROJECT_NAME}-checkpoints-xxx"
-      echo "  IAM: ${PROJECT_NAME}-control-plane, ${PROJECT_NAME}-worker"
+      echo "  IAM: ${PROJECT_NAME}-worker (P2P architecture, no control plane)"
       exit 0
       ;;
     *)
@@ -49,19 +49,24 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-echo "🚀 Synkti GitOps Bootstrap"
-echo "=========================="
+echo "🚀 Synkti GitOps Bootstrap (P2P Architecture)"
+echo "============================================"
 echo "Project: $PROJECT_NAME"
 echo "Region: $REGION"
 echo ""
 
 # Step 1: Build the orchestrator
-echo "📦 Step 1: Building synkti-orchestrator..."
+echo "📦 Step 1: Building synkti..."
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$REPO_DIR/crates"
-cargo build --release -p synkti-orchestrator
-BINARY_PATH="$REPO_DIR/crates/target/release/synkti-orchestrator"
+if ! cargo build --release -p synkti-orchestrator; then
+  echo ""
+  echo "❌ Build failed. Fix compilation errors first:"
+  echo "   cd crates && cargo build -p synkti-orchestrator"
+  exit 1
+fi
+BINARY_PATH="$REPO_DIR/crates/target/release/synkti"
 
 if [ ! -f "$BINARY_PATH" ]; then
   echo "❌ Binary not found at $BINARY_PATH"
@@ -73,52 +78,126 @@ echo "✅ Built: $BINARY_PATH"
 echo ""
 echo "🏗️  Step 2: Creating infrastructure..."
 cd "$REPO_DIR/infra"
-terraform init
-terraform apply -auto-approve -var="project_name=$PROJECT_NAME"
+if ! terraform init >/dev/null 2>&1; then
+  echo "❌ Terraform init failed"
+  exit 1
+fi
+if ! terraform apply -auto-approve -var="project_name=$PROJECT_NAME"; then
+  echo ""
+  echo "❌ Terraform apply failed. Check the errors above."
+  echo "   Re-run with: cd infra && terraform plan -var='project_name=$PROJECT_NAME'"
+  exit 1
+fi
 
-BUCKET_NAME=$(terraform output -raw models_bucket_name)
-CHECKPOINT_BUCKET=$(terraform output -raw checkpoint_bucket_name)
+BUCKET_NAME=$(terraform output -raw models_bucket_name 2>/dev/null) || {
+  echo "❌ Failed to get bucket name from terraform output"
+  exit 1
+}
+CHECKPOINT_BUCKET=$(terraform output -raw checkpoint_bucket_name 2>/dev/null) || {
+  echo "❌ Failed to get checkpoint bucket name from terraform output"
+  exit 1
+}
 
 echo ""
 echo "📋 Buckets:"
 echo "  Models:      $BUCKET_NAME"
 echo "  Checkpoints: $CHECKPOINT_BUCKET"
 
+# Create owner marker so synkti knows infra exists
+OWNER_MARKER="/tmp/synkti-${PROJECT_NAME}.owner"
+echo $$ > "$OWNER_MARKER"
+echo "✅ Created owner marker: $OWNER_MARKER"
+
 # Step 3: Upload orchestrator binary to S3
 echo ""
 echo "📤 Step 3: Uploading orchestrator binary to S3..."
-aws s3 cp "$BINARY_PATH" "s3://${BUCKET_NAME}/bin/synkti-orchestrator" \
-  --region "$REGION"
-echo "✅ Binary uploaded to: s3://${BUCKET_NAME}/bin/synkti-orchestrator"
+if ! aws s3 cp "$BINARY_PATH" "s3://${BUCKET_NAME}/bin/synkti" --region "$REGION"; then
+  echo "❌ Binary upload failed"
+  echo "   Manual upload: aws s3 cp ${BINARY_PATH} s3://${BUCKET_NAME}/bin/synkti --region ${REGION}"
+  exit 1
+fi
+echo "✅ Binary uploaded to: s3://${BUCKET_NAME}/bin/synkti"
 
-# Step 4: Upload model weights if provided
+# Step 4: Check and upload model weights
+echo ""
+echo "📦 Step 4: Checking model weights..."
+
+# Check if bucket has any models
+MODEL_COUNT=$(aws s3 ls "s3://${BUCKET_NAME}/" --recursive --region "$REGION" 2>/dev/null | wc -l)
+
 if [ -n "$MODEL_PATH" ] && [ -d "$MODEL_PATH" ]; then
-  echo ""
-  echo "📤 Step 4: Uploading model weights to S3..."
+  echo "📤 Uploading model weights from: $MODEL_PATH"
   MODEL_NAME=$(basename "$MODEL_PATH")
   aws s3 sync "$MODEL_PATH" "s3://${BUCKET_NAME}/${MODEL_NAME}/" \
     --region "$REGION"
   echo "✅ Model uploaded to: s3://${BUCKET_NAME}/${MODEL_NAME}/"
-else
-  echo ""
-  echo "⏭️  Step 4: Skipped (no --model-path provided)"
-  echo "   Upload models later with:"
-  echo "   aws s3 sync /path/to/model s3://${BUCKET_NAME}/model-name/"
+  MODEL_COUNT=$(aws s3 ls "s3://${BUCKET_NAME}/" --recursive --region "$REGION" 2>/dev/null | wc -l)
 fi
 
-# Step 5: Next steps
+# Step 5: Verification
 echo ""
-echo "📝 Step 5: Next steps:"
+echo "🔍 Step 5: Verifying deployment..."
+BOOTSTRAP_SUCCESS=true
+
+# Check binary uploaded
+BINARY_S3_PATH="s3://${BUCKET_NAME}/bin/synkti"
+if aws s3 ls "$BINARY_S3_PATH" --region "$REGION" >/dev/null 2>&1; then
+  # Get local binary size
+  LOCAL_SIZE=$(stat -f%z "$BINARY_PATH" 2>/dev/null || stat -c%s "$BINARY_PATH" 2>/dev/null)
+  # Get S3 binary size
+  S3_SIZE=$(aws s3 ls "$BINARY_S3_PATH" --region "$REGION" --human-readable | awk '{print $3}')
+  echo "✅ Binary uploaded: $BINARY_S3_PATH (local: ${LOCAL_SIZE} bytes)"
+else
+  echo "❌ Binary NOT found in S3: $BINARY_S3_PATH"
+  BOOTSTRAP_SUCCESS=false
+fi
+
+# Check model weights exist
 echo ""
-echo "1. Commit and push changes:"
-echo "   git add infra/"
-echo "   git commit -m 'Configure GitOps deployment'"
-echo "   git push"
+if [ "$MODEL_COUNT" -eq 0 ]; then
+  echo "❌ No model weights found in s3://${BUCKET_NAME}/"
+  echo ""
+  echo "   Upload models before launching workers:"
+  echo "   aws s3 sync /path/to/model s3://${BUCKET_NAME}/model-name/"
+  BOOTSTRAP_SUCCESS=false
+else
+  echo "✅ Model weights found: $MODEL_COUNT object(s) in s3://${BUCKET_NAME}/"
+  echo "   Sample files:"
+  aws s3 ls "s3://${BUCKET_NAME}/" --recursive --region "$REGION" | head -3 | sed 's/^/     /'
+fi
+
+# Step 6: Result and next steps
 echo ""
-echo "2. GitHub Actions will automatically deploy!"
-echo ""
-echo "✅ Bootstrap complete!"
-echo ""
-echo "Your project: $PROJECT_NAME"
-echo "Models bucket: s3://${BUCKET_NAME}/"
-echo "Upload model weights there, then reference with --model-s3 flag."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+if [ "$BOOTSTRAP_SUCCESS" = true ]; then
+  echo "✅ BOOTSTRAP SUCCESSFUL!"
+  echo ""
+  echo "📦 Project: $PROJECT_NAME"
+  echo "🪣 Models:  s3://${BUCKET_NAME}/"
+  echo "📝 Binary:  $BINARY_S3_PATH"
+  echo ""
+  echo "🚀 Ready to launch workers:"
+  echo ""
+  echo "   Via Terraform:"
+  echo "   cd infra && terraform apply -var='project_name=${PROJECT_NAME}' -var='worker_count=2'"
+  echo ""
+  echo "   Via CLI:"
+  echo "   ./target/release/synkti --project-name ${PROJECT_NAME}"
+else
+  echo "⚠️  BOOTSTRAP INCOMPLETE"
+  echo ""
+  echo "🔧 Troubleshooting:"
+  echo ""
+  echo "   If binary upload failed:"
+  echo "   aws s3 cp ${BINARY_PATH} s3://${BUCKET_NAME}/bin/synkti --region ${REGION}"
+  echo ""
+  echo "   If models are missing:"
+  echo "   aws s3 sync /path/to/model s3://${BUCKET_NAME}/model-name/ --region ${REGION}"
+  echo ""
+  echo "   If terraform failed:"
+  echo "   cd infra && terraform plan -var='project_name=${PROJECT_NAME}'"
+  echo ""
+  echo "   Re-run bootstrap after fixing:"
+  echo "   ./scripts/bootstrap.sh --project ${PROJECT_NAME}"
+fi
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
