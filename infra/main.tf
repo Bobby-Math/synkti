@@ -1,4 +1,5 @@
 # Synkti Infrastructure - Terraform Configuration
+# P2P Architecture: No control plane - all nodes are self-governing workers
 # RAII-style infrastructure: terraform apply creates, terraform destroy cleans up
 
 terraform {
@@ -23,9 +24,20 @@ provider "aws" {
 
 # --- Data Sources ---
 
-# Get latest Amazon Linux 2 GPU AMI
-data "aws_ssm_parameter" "gpu_ami" {
-  name = "/aws/service/ecs/optimized-ami/amazon-linux-2/gpu/recommended/image_id"
+# Get latest Amazon Linux 2023 AMI (has OpenSSL 3.x for synkti binary compatibility)
+data "aws_ami" "al2023" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.*-x86_64"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
 }
 
 # Get default VPC
@@ -35,58 +47,7 @@ data "aws_vpc" "default" {
 
 # --- IAM Roles ---
 
-# Control Plane Role
-resource "aws_iam_role" "control_plane" {
-  name = "${var.project_name}-control-plane"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = {
-        Service = "ec2.amazonaws.com"
-      }
-    }]
-  })
-
-  tags = {
-    Name      = "${var.project_name}-control-plane"
-    ManagedBy = "Synkti"
-    Project   = var.project_name
-  }
-}
-
-resource "aws_iam_role_policy_attachment" "control_plane_ec2" {
-  role       = aws_iam_role.control_plane.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2FullAccess"
-}
-
-resource "aws_iam_role_policy_attachment" "control_plane_s3" {
-  role       = aws_iam_role.control_plane.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
-}
-
-resource "aws_iam_role_policy_attachment" "control_plane_ssm" {
-  role       = aws_iam_role.control_plane.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
-
-resource "aws_iam_role_policy" "control_plane_pass_role" {
-  name = "${var.project_name}-pass-worker-role"
-  role = aws_iam_role.control_plane.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "iam:PassRole"
-      Effect = "Allow"
-      Resource = aws_iam_role.worker.arn
-    }]
-  })
-}
-
-# Worker Role
+# Worker Role (all nodes are workers in P2P architecture)
 resource "aws_iam_role" "worker" {
   name = "${var.project_name}-worker"
 
@@ -118,6 +79,16 @@ resource "aws_iam_role_policy_attachment" "worker_s3_read" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
 }
 
+resource "aws_iam_role_policy_attachment" "worker_ec2" {
+  role       = aws_iam_role.worker.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2FullAccess"
+}
+
+resource "aws_iam_role_policy_attachment" "worker_s3_full" {
+  role       = aws_iam_role.worker.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+}
+
 # Explicit policy for models bucket access
 resource "aws_iam_role_policy" "worker_models_read" {
   name = "${var.project_name}-worker-models-read"
@@ -130,7 +101,9 @@ resource "aws_iam_role_policy" "worker_models_read" {
         Effect = "Allow"
         Action = [
           "s3:GetObject",
-          "s3:ListBucket"
+          "s3:ListBucket",
+          "s3:PutObject",
+          "s3:DeleteObject"
         ]
         Resource = [
           aws_s3_bucket.models.arn,
@@ -243,33 +216,10 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "checkpoints" {
 
 # --- Security Groups ---
 
-# Control Plane SG
-resource "aws_security_group" "control_plane" {
-  name        = "${var.project_name}-control-plane"
-  description = "Synkti control plane security group"
-  vpc_id      = data.aws_vpc.default.id
-
-  tags = {
-    Name      = "${var.project_name}-control-plane"
-    ManagedBy = "Synkti"
-    Project   = var.project_name
-  }
-}
-
-resource "aws_vpc_security_group_ingress_rule" "control_plane_ssh" {
-  for_each = toset(var.allowed_cidr_blocks)
-  security_group_id = aws_security_group.control_plane.id
-  description        = "SSH from ${each.value}"
-  ip_protocol      = "tcp"
-  from_port         = 22
-  to_port           = 22
-  cidr_ipv4         = each.value
-}
-
-# Worker SG
+# Worker SG (all nodes use this in P2P architecture)
 resource "aws_security_group" "worker" {
   name        = "${var.project_name}-worker"
-  description = "Synkti worker security group"
+  description = "Synkti worker security group (P2P - all nodes are workers)"
   vpc_id      = data.aws_vpc.default.id
 
   tags = {
@@ -279,84 +229,101 @@ resource "aws_security_group" "worker" {
   }
 }
 
-resource "aws_vpc_security_group_ingress_rule" "worker_from_control" {
-  security_group_id      = aws_security_group.worker.id
-  description             = "From control plane"
-  ip_protocol            = "-1"
-  referenced_security_group_id = aws_security_group.control_plane.id
+# Allow SSH from allowed CIDR blocks
+resource "aws_vpc_security_group_ingress_rule" "worker_ssh" {
+  for_each       = toset(var.allowed_cidr_blocks)
+  security_group_id = aws_security_group.worker.id
+  description         = "SSH from ${each.value}"
+  ip_protocol         = "tcp"
+  from_port           = 22
+  to_port             = 22
+  cidr_ipv4           = each.value
+}
+
+# Allow HTTP/HTTPS from allowed CIDR blocks (for vLLM API access)
+resource "aws_vpc_security_group_ingress_rule" "worker_http" {
+  for_each       = toset(var.allowed_cidr_blocks)
+  security_group_id = aws_security_group.worker.id
+  description        = "HTTP from ${each.value}"
+  ip_protocol        = "tcp"
+  from_port          = 80
+  to_port            = 80
+  cidr_ipv4          = each.value
+}
+
+resource "aws_vpc_security_group_ingress_rule" "worker_https" {
+  for_each       = toset(var.allowed_cidr_blocks)
+  security_group_id = aws_security_group.worker.id
+  description        = "HTTPS from ${each.value}"
+  ip_protocol        = "tcp"
+  from_port          = 443
+  to_port            = 443
+  cidr_ipv4          = each.value
+}
+
+# Allow vLLM default port (8000) from allowed CIDR blocks
+resource "aws_vpc_security_group_ingress_rule" "worker_vllm" {
+  for_each       = toset(var.allowed_cidr_blocks)
+  security_group_id = aws_security_group.worker.id
+  description        = "vLLM API from ${each.value}"
+  ip_protocol        = "tcp"
+  from_port          = 8000
+  to_port            = 8000
+  cidr_ipv4          = each.value
+}
+
+# Allow P2P communication between workers
+resource "aws_vpc_security_group_ingress_rule" "worker_p2p" {
+  security_group_id              = aws_security_group.worker.id
+  description                    = "P2P communication between workers"
+  ip_protocol                    = "-1"
+  referenced_security_group_id  = aws_security_group.worker.id
+}
+
+# Allow all outbound traffic (required for S3, SSM, yum, etc.)
+resource "aws_vpc_security_group_egress_rule" "worker_all_outbound" {
+  security_group_id = aws_security_group.worker.id
+  description       = "Allow all outbound traffic"
+  ip_protocol       = "-1"
+  cidr_ipv4         = "0.0.0.0/0"
 }
 
 # --- EC2 Instances ---
 
-# Control Plane instance profile
-resource "aws_iam_instance_profile" "control_plane" {
-  name = "${var.project_name}-control-plane"
-  role = aws_iam_role.control_plane.name
-}
+# GPU Workers (optional - can also launch via synkti CLI)
+# In P2P architecture, all nodes are workers that self-govern
+resource "aws_instance" "gpu_worker" {
+  count         = var.worker_count
+  instance_type = var.worker_instance_type
+  ami           = var.worker_ami_id != "" ? var.worker_ami_id : data.aws_ami.al2023.id
 
-# Control Plane
-resource "aws_instance" "control_plane" {
-  count         = var.control_plane_count
-  instance_type = var.control_plane_instance_type
-  ami           = var.control_plane_ami_id != "" ? var.control_plane_ami_id : data.aws_ssm_parameter.gpu_ami.value
-
-  iam_instance_profile = aws_iam_instance_profile.control_plane.name
-
-  vpc_security_group_ids = [aws_security_group.control_plane.id]
-
-  # Let AWS pick subnet in supported AZ
-  # (t3.medium not available in us-east-1e)
+  iam_instance_profile = aws_iam_instance_profile.worker.name
+  vpc_security_group_ids = [aws_security_group.worker.id]
 
   # GitOps: Auto-install and auto-start Synkti on boot
-  # Build user_data script that uses variables
   user_data = templatefile("${path.module}/user-data.sh", {
     project_name           = var.project_name
     models_bucket          = aws_s3_bucket.models.id
     region                 = var.aws_region
-    synkti_binary_s3_path = var.synkti_binary_s3_path != "" ? var.synkti_binary_s3_path : "s3://${aws_s3_bucket.models.id}/bin/synkti-orchestrator"
-    model_s3_path          = var.model_s3_path != "" ? var.model_s3_path : "s3://${aws_s3_bucket.models.id}/llama-2-7b/"
+    synkti_binary_s3_path = var.synkti_binary_s3_path != "" ? var.synkti_binary_s3_path : "s3://${aws_s3_bucket.models.id}/bin/synkti"
+    model_s3_path          = var.model_s3_path != "" ? var.model_s3_path : "s3://${aws_s3_bucket.models.id}/qwen2.5-7b/"
     huggingface_model      = var.huggingface_model_id
   })
-
-  tags = {
-    Name      = "${var.project_name}-control-plane-${count.index}"
-    ManagedBy = "Synkti"
-    Project   = var.project_name
-    Role      = "ControlPlane"
-  }
-}
-
-# GPU Workers (optional - can also launch via synkti CLI)
-resource "aws_instance" "gpu_worker" {
-  count         = var.worker_count
-  instance_type = var.worker_instance_type
-  ami           = var.worker_ami_id != "" ? var.worker_ami_id : data.aws_ssm_parameter.gpu_ami.value
-
-  iam_instance_profile = aws_iam_instance_profile.worker.name
-
-  vpc_security_group_ids = [aws_security_group.worker.id]
-
-  # Let AWS pick subnet in supported AZ
-
-  user_data = <<-EOF
-              #!/bin/bash
-              set -eux
-              yum update -y
-              # NVIDIA drivers and CUDA installed via AMI or manual setup
-              systemctl start docker
-              systemctl enable docker
-              EOF
 
   tags = {
     Name      = "${var.project_name}-worker-${count.index}"
     ManagedBy = "Synkti"
     Project   = var.project_name
     Role      = "Worker"
+    SynktiCluster = var.project_name
+    SynktiRole = "worker"
   }
 
   # Wait for SSM to be ready before considering this instance created
   depends_on = [
     aws_iam_role_policy_attachment.worker_ssm,
     aws_iam_role_policy_attachment.worker_s3_read,
+    aws_iam_role_policy_attachment.worker_ec2,
+    aws_iam_role_policy_attachment.worker_s3_full,
   ]
 }

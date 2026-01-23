@@ -1,4 +1,4 @@
-# Input variables for Synkti infrastructure
+# Input variables for Synkti infrastructure (P2P Architecture)
 
 variable "aws_region" {
   description = "AWS region"
@@ -17,34 +17,6 @@ variable "project_name" {
   }
 }
 
-variable "control_plane_count" {
-  description = "Number of control plane instances"
-  type        = number
-  default     = 1
-
-  validation {
-    condition     = var.control_plane_count >= 0 && var.control_plane_count <= 10
-    error_message = "Control plane count must be between 0 and 10."
-  }
-}
-
-variable "control_plane_instance_type" {
-  description = "Control plane instance type"
-  type        = string
-  default     = "t3.medium"
-
-  validation {
-    condition     = can(regex("^[a-z][0-9]\\.?((nano|micro|small|medium|large)|[0-9]+xlarge)$", var.control_plane_instance_type))
-    error_message = "Must be a valid AWS instance type (e.g., t3.medium, t3.large)."
-  }
-}
-
-variable "control_plane_ami_id" {
-  description = "Custom control plane AMI (empty to use Amazon Linux 2 GPU AMI from SSM)"
-  type        = string
-  default     = ""
-}
-
 variable "worker_count" {
   description = "Number of GPU worker instances to create via Terraform (use 0 to launch via synkti CLI)"
   type        = number
@@ -57,14 +29,9 @@ variable "worker_count" {
 }
 
 variable "worker_instance_type" {
-  description = "Worker instance type"
+  description = "Worker instance type (GPU recommended: g4dn.xlarge, g5.xlarge; CPU for testing: t3.medium)"
   type        = string
   default     = "g4dn.xlarge"
-
-  validation {
-    condition     = can(regex("^(g[0-9]+|[p][0-9]+)", var.worker_instance_type))
-    error_message = "Worker instance type should be a GPU instance (e.g., g4dn.xlarge, g5.xlarge, p3.2xlarge)."
-  }
 }
 
 variable "worker_ami_id" {
@@ -74,7 +41,7 @@ variable "worker_ami_id" {
 }
 
 variable "allowed_cidr_blocks" {
-  description = "CIDR blocks allowed to access control plane (SSH/HTTP)"
+  description = "CIDR blocks allowed to access workers (SSH/HTTP/vLLM API)"
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
@@ -91,21 +58,21 @@ variable "checkpoint_bucket_expiration_days" {
 }
 
 variable "synkti_binary_s3_path" {
-  description = "S3 path to synkti-orchestrator binary (for GitOps auto-install)"
+  description = "S3 path to synkti binary (for GitOps auto-install)"
   type        = string
   default     = ""
-  # Example: "s3://my-project-models/bin/synkti-orchestrator"
+  # Example: "s3://my-project-models/bin/synkti"
 }
 
 variable "model_s3_path" {
   description = "S3 path to model weights (for auto-download)"
   type        = string
   default     = ""
-  # Example: "s3://my-project-models/llama-2-7b/"
+  # Example: "s3://my-project-models/qwen2.5-7b/"
 }
 
 variable "huggingface_model_id" {
   description = "HuggingFace model ID (used if model_s3_path is empty)"
   type        = string
-  default     = "meta-llama/Llama-2-7b-hf"
+  default     = "Qwen/Qwen2.5-7B-Instruct"
 }
