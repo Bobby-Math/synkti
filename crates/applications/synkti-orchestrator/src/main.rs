@@ -1,5 +1,11 @@
 //! Synkti - P2P Spot Instance Orchestration
 //!
+//! ## RAII Philosophy
+//!
+//! Synkti is a responsible intelligence that borrows cloud resources temporarily
+//! and returns them promptly. When synkti exits (gracefully or via panic), it
+//! cleans up all resources it created. This embodies RAII at the system level.
+//!
 //! ## Usage
 //!
 //! ```bash
@@ -9,6 +15,10 @@
 //! # Infrastructure management
 //! synkti infra create --project-name synkti-prod
 //! synkti infra destroy --project-name synkti-prod
+//!
+//! # Worker management (RAII-style: synkti supervises the worker)
+//! synkti worker launch --project-name synkti-prod
+//! # ^ Press Ctrl+C to exit and auto-terminate worker
 //!
 //! # Spot monitoring only (no orchestrator)
 //! synkti monitor
@@ -29,12 +39,65 @@ use synkti_orchestrator::{
     remote::SsmExecutor,
     vllm::{VllmClient, VllmConfig, VllmContainer},
 };
-use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use anyhow::Context;
 use aws_sdk_ec2::Client as Ec2Client;
+
+/// RAII guard for self-termination.
+///
+/// Runs on the EC2 instance itself. When synkti exits (gracefully or via panic),
+/// this guard terminates the instance it's running on. This implements the principle
+/// that synkti is a responsible intelligence that borrows resources and returns them.
+struct SelfTerminatingGuard {
+    instance_id: String,
+    region: String,
+}
+
+impl SelfTerminatingGuard {
+    /// Create a new self-terminating guard.
+    fn new(instance_id: String, region: String) -> Self {
+        Self { instance_id, region }
+    }
+
+    /// Terminate this instance.
+    fn terminate(&self) {
+        info!("🛑 Terminating this instance {}", self.instance_id);
+        match std::process::Command::new("aws")
+            .args([
+                "ec2",
+                "terminate-instances",
+                "--instance-ids",
+                &self.instance_id,
+                "--region",
+                &self.region,
+            ])
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                info!("✅ Self-termination initiated");
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!("⚠️  Failed to terminate: {}", stderr);
+            }
+            Err(e) => {
+                warn!("⚠️  Failed to run aws command: {}", e);
+            }
+        }
+    }
+}
+
+impl Drop for SelfTerminatingGuard {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            error!("💥 PANIC! Self-terminating to return borrowed resources");
+        } else {
+            info!("👋 Synkti exiting. Self-terminating to return borrowed resources");
+        }
+        self.terminate();
+    }
+}
 
 /// Synkti: P2P Spot Instance Orchestration for ML Inference
 #[derive(Parser)]
@@ -63,6 +126,12 @@ enum Commands {
     Infra {
         #[command(subcommand)]
         action: InfraAction,
+    },
+
+    /// Worker instance management (launch, list, terminate)
+    Worker {
+        #[command(subcommand)]
+        action: WorkerAction,
     },
 
     /// Monitor spot instance for interruption notices (standalone, no orchestrator)
@@ -125,6 +194,65 @@ enum InfraAction {
     Status,
 }
 
+#[derive(Subcommand)]
+enum WorkerAction {
+    /// Launch a new spot worker instance
+    Launch {
+        /// Instance type (e.g., g4dn.xlarge, g5.xlarge)
+        #[arg(long, default_value = "g4dn.xlarge")]
+        instance_type: String,
+
+        /// AMI ID (optional, auto-detected based on instance type)
+        #[arg(long)]
+        ami: Option<String>,
+
+        /// IAM instance profile name
+        #[arg(long)]
+        iam_profile: Option<String>,
+
+        /// Security group IDs
+        #[arg(long)]
+        security_groups: Vec<String>,
+
+        /// Subnet ID
+        #[arg(long)]
+        subnet: Option<String>,
+
+        /// Key pair name
+        #[arg(long)]
+        key_pair: Option<String>,
+
+        /// User data script file
+        #[arg(long)]
+        user_data: Option<String>,
+
+        /// Spot maximum price (USD/hour, empty = on-demand price)
+        #[arg(long)]
+        spot_price: Option<String>,
+
+        /// Wait for instance to be running
+        #[arg(long)]
+        wait: bool,
+    },
+
+    /// List all worker instances
+    List {
+        /// Show detailed information
+        #[arg(long)]
+        detailed: bool,
+    },
+
+    /// Terminate a worker instance
+    Terminate {
+        /// Instance ID to terminate
+        instance_id: String,
+
+        /// Skip confirmation prompt
+        #[arg(long)]
+        force: bool,
+    },
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Initialize tracing
@@ -146,6 +274,13 @@ async fn main() -> anyhow::Result<()> {
                     anyhow::anyhow!("--project-name required for infra commands")
                 })?;
                 handle_infra(project, cli.region, cli.infra_dir, action).await
+            }
+
+            Commands::Worker { action } => {
+                let project = cli.project_name.ok_or_else(|| {
+                    anyhow::anyhow!("--project-name required for worker commands")
+                })?;
+                handle_worker(project, cli.region, cli.infra_dir, action).await
             }
 
             Commands::Monitor { interval, action } => {
@@ -275,6 +410,249 @@ async fn handle_infra(
             info!("📋 Infrastructure status for: {}", project);
             let outputs = terraform.parse_outputs()?;
             print_infra_outputs(&outputs);
+            Ok(())
+        }
+    }
+}
+
+/// Handle worker commands
+async fn handle_worker(
+    project: String,
+    region: String,
+    infra_dir: String,
+    action: WorkerAction,
+) -> anyhow::Result<()> {
+    use synkti_orchestrator::instance::{
+        create_ec2_client, get_gpu_ami, get_standard_ami, is_gpu_instance_type,
+        list_workers, terminate_worker, InstanceSpec,
+    };
+
+    let ec2_client = create_ec2_client(Some(region.clone())).await?;
+
+    match action {
+        WorkerAction::Launch {
+            instance_type,
+            ami,
+            iam_profile,
+            security_groups,
+            subnet,
+            key_pair,
+            user_data,
+            spot_price: _,
+            wait,
+        } => {
+            info!("🚀 Launching worker instance for project: {}", project);
+            info!("   Instance type: {}", instance_type);
+
+            // Get AMI ID
+            let ami_id = if let Some(ami) = ami {
+                ami
+            } else {
+                // Auto-detect AMI based on instance type
+                if is_gpu_instance_type(&instance_type) {
+                    info!("🔍 Detecting GPU AMI...");
+                    get_gpu_ami(&ec2_client, &region).await?
+                } else {
+                    info!("🔍 Detecting standard AMI...");
+                    get_standard_ami(&ec2_client, &region).await?
+                }
+            };
+            info!("   AMI: {}", ami_id);
+
+            // Get IAM profile from terraform outputs if not specified
+            let iam_profile = if let Some(profile) = iam_profile {
+                profile
+            } else {
+                let terraform = TerraformRunner::new(&infra_dir, &project);
+                match terraform.get_output("worker_instance_profile_name") {
+                    Ok(profile) => {
+                        info!("   IAM profile: {} (from terraform)", profile);
+                        profile
+                    }
+                    Err(_) => {
+                        warn!("⚠️  No IAM profile found, instance may not have SSM access");
+                        String::new()
+                    }
+                }
+            };
+
+            // Get security groups from terraform if not specified
+            let security_groups = if security_groups.is_empty() {
+                let terraform = TerraformRunner::new(&infra_dir, &project);
+                match terraform.get_output("worker_sg_id") {
+                    Ok(sg_id) => {
+                        info!("   Security group: {} (from terraform)", sg_id);
+                        vec![sg_id]
+                    }
+                    Err(_) => {
+                        warn!("⚠️  No security groups specified");
+                        vec![]
+                    }
+                }
+            } else {
+                security_groups
+            };
+
+            // Get models bucket for user data template
+            let terraform = TerraformRunner::new(&infra_dir, &project);
+            let models_bucket = match terraform.get_output("models_bucket_name") {
+                Ok(bucket) => bucket,
+                Err(_) => {
+                    warn!("⚠️  Could not get models bucket for user data");
+                    format!("{}-models", project)
+                }
+            };
+
+            // Read user data from file if specified, or use default from infra directory
+            let user_data_explicitly_provided = user_data.is_some();
+            let user_data_file = if let Some(file_path) = user_data {
+                file_path
+            } else {
+                // Default to user-data.sh in infra directory
+                format!("{}/user-data.sh", infra_dir)
+            };
+
+            let user_data_content = match std::fs::read_to_string(&user_data_file) {
+                Ok(mut content) => {
+                    // Template variables (same as terraform templatefile)
+                    content = content.replace("${project_name}", &project);
+                    content = content.replace("${models_bucket}", &models_bucket);
+                    content = content.replace("${region}", &region);
+                    content = content.replace("${synkti_binary_s3_path}", &format!("s3://{}/bin/synkti", models_bucket));
+                    content = content.replace("${model_s3_path}", &format!("s3://{}/qwen2.5-7b/", models_bucket));
+                    content = content.replace("${huggingface_model}", "Qwen/Qwen2.5-7B-Instruct");
+
+                    info!("   User data: {}", user_data_file);
+                    use base64::prelude::*;
+                    Some(BASE64_STANDARD.encode(content))
+                }
+                Err(e) => {
+                    if user_data_explicitly_provided {
+                        anyhow::bail!("Failed to read user data file: {}", e);
+                    } else {
+                        // User data file is optional if not explicitly specified
+                        warn!("⚠️  No user data file found at {} - instance will not have vLLM", user_data_file);
+                        None
+                    }
+                }
+            };
+
+            // Build instance spec
+            let mut spec = InstanceSpec::new(&ami_id)
+                .with_instance_type(&instance_type)
+                .with_iam_profile(&iam_profile)
+                .with_spot_price(""); // Empty = on-demand price cap
+
+            for sg in &security_groups {
+                spec = spec.with_security_group(sg);
+            }
+
+            if let Some(subnet) = subnet {
+                spec = spec.with_subnet(subnet);
+            }
+
+            if let Some(key_pair) = key_pair {
+                spec = spec.with_key_pair(key_pair);
+            }
+
+            if let Some(user_data) = user_data_content {
+                spec = spec.with_user_data(user_data);
+            }
+
+            // Launch instance with project tags
+            let tags = vec![
+                ("Name".to_string(), format!("{}-worker", project)),
+                ("SynktiCluster".to_string(), project.clone()),
+                ("SynktiRole".to_string(), "worker".to_string()),
+                ("ManagedBy".to_string(), "Synkti".to_string()),
+                ("Project".to_string(), project.clone()),
+            ];
+
+            let mut instance = spec.launch(&ec2_client, tags).await?;
+            info!("✅ Instance launched: {}", instance.id);
+
+            // Wait for running if requested
+            if wait {
+                info!("⏳ Waiting for instance to be running...");
+                instance.wait_until_running(&ec2_client, std::time::Duration::from_secs(300)).await?;
+                info!("✅ Instance is running");
+                if let Some(ip) = &instance.public_ip {
+                    info!("   Public IP: {}", ip);
+                }
+                if let Some(ip) = &instance.private_ip {
+                    info!("   Private IP: {}", ip);
+                }
+            }
+
+            // Fire and forget: instance runs independently with its own RAII
+            info!("");
+            info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            info!("🚀 Worker {} is now running independently", instance.id);
+            info!("   RAII is active ON THE INSTANCE: if synkti crashes there,");
+            info!("   the instance will self-terminate to return borrowed resources.");
+            info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+            Ok(())
+        }
+
+        WorkerAction::List { detailed } => {
+            info!("📋 Listing workers for project: {}", project);
+
+            let workers = list_workers(&ec2_client, &project).await?;
+
+            if workers.is_empty() {
+                info!("⚠️  No workers found");
+                return Ok(());
+            }
+
+            info!("Found {} worker(s)", workers.len());
+            info!("");
+            info!("{:<20} {:<15} {:<12} {:<18}", "Instance ID", "State", "Type", "IP Address");
+            info!("{:-<20} {:-<15} {:-<12} {:-<18}", "───────", "─────", "─────", "─────");
+
+            for worker in &workers {
+                let state_str = format!("{:?}", worker.state);
+                info!(
+                    "{:<20} {:<15} {:<12} {:<18}",
+                    worker.id,
+                    state_str,
+                    worker.instance_type,
+                    worker.private_ip.as_ref().unwrap_or(&"N/A".to_string())
+                );
+
+                if detailed {
+                    info!("   Launch time: {}", worker.launch_time);
+                    info!("   GPU memory: {} GB", worker.gpu_memory_gb);
+                    if let Some(public_ip) = &worker.public_ip {
+                        info!("   Public IP: {}", public_ip);
+                    }
+                    info!("");
+                }
+            }
+
+            Ok(())
+        }
+
+        WorkerAction::Terminate {
+            instance_id,
+            force,
+        } => {
+            if !force {
+                println!("⚠️  This will terminate instance '{}'", instance_id);
+                print!("Continue? [y/N]: ");
+                use std::io::Write;
+                std::io::stdout().flush()?;
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input)?;
+                if !input.trim().to_lowercase().starts_with('y') {
+                    info!("Aborted");
+                    return Ok(());
+                }
+            }
+
+            info!("🗑️  Terminating worker: {}", instance_id);
+            terminate_worker(&ec2_client, &instance_id).await?;
+            info!("✅ Worker termination initiated");
             Ok(())
         }
     }
@@ -662,6 +1040,23 @@ async fn run_orchestrator(
     info!("📦 Project: {}", project);
     info!("🌍 Region: {}", region);
 
+    // Get current instance ID early for RAII guard
+    let current_instance_id = match get_current_instance_id().await {
+        Ok(id) => {
+            info!("🆔 Current instance: {}", id);
+            id
+        }
+        Err(e) => {
+            anyhow::bail!("Not running on EC2, cannot use RAII: {}", e);
+        }
+    };
+
+    // RAII: If this synkti process exits or crashes, terminate this instance
+    // This embodies the principle: synkti is a responsible intelligence that
+    // borrows resources and returns them promptly.
+    let _self_guard = SelfTerminatingGuard::new(current_instance_id.clone(), region.clone());
+    info!("🛡️  RAII active: This instance will auto-terminate if synkti exits");
+
     // Ensure infrastructure exists
     let terraform = TerraformRunner::new(&infra_dir, &project);
     if !is_owner(&project) {
@@ -681,18 +1076,6 @@ async fn run_orchestrator(
     // Build AWS config
     let aws_config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
 
-    // Get current instance info for P2P discovery
-    let current_instance_id = match get_current_instance_id().await {
-        Ok(id) => {
-            info!("🆔 Current instance: {}", id);
-            Some(id)
-        }
-        Err(e) => {
-            warn!("⚠️  Could not get instance ID (not running on EC2?): {}", e);
-            None
-        }
-    };
-
     // EC2 client for tagging and discovery
     let ec2_client = aws_sdk_ec2::Client::new(&aws_config);
 
@@ -700,16 +1083,14 @@ async fn run_orchestrator(
     let cluster_name = project.clone();
 
     // Tag self as Synkti worker for peer discovery
-    if let Some(ref instance_id) = current_instance_id {
-        match tag_self_as_worker(&ec2_client, instance_id, &cluster_name).await {
-            Ok(()) => info!("🏷️  Tagged as worker in cluster '{}'", cluster_name),
-            Err(e) => warn!("⚠️  Failed to tag self: {}", e),
-        }
+    match tag_self_as_worker(&ec2_client, &current_instance_id, &cluster_name).await {
+        Ok(()) => info!("🏷️  Tagged as worker in cluster '{}'", cluster_name),
+        Err(e) => warn!("⚠️  Failed to tag self: {}", e),
     }
 
     // Setup P2P peer discovery
     let discovery_config = DiscoveryConfig::new(&cluster_name)
-        .with_self_instance_id(current_instance_id.clone().unwrap_or_default())
+        .with_self_instance_id(current_instance_id.clone())
         .with_refresh_interval(Duration::from_secs(30));
 
     let peer_discovery = Arc::new(PeerDiscovery::from_config(&aws_config, discovery_config).await);
@@ -873,11 +1254,9 @@ async fn run_orchestrator(
             monitor_task.abort();
 
             // Untag self from cluster before shutdown
-            if let Some(ref instance_id) = current_instance_id {
-                info!("🏷️  Removing worker tags...");
-                if let Err(e) = untag_self_as_worker(&ec2_client, instance_id).await {
-                    warn!("⚠️  Failed to untag self: {}", e);
-                }
+            info!("🏷️  Removing worker tags...");
+            if let Err(e) = untag_self_as_worker(&ec2_client, &current_instance_id).await {
+                warn!("⚠️  Failed to untag self: {}", e);
             }
 
             vllm.stop().await?;
@@ -887,10 +1266,8 @@ async fn run_orchestrator(
             info!("Monitor task ended: {:?}", result);
 
             // Untag self from cluster
-            if let Some(ref instance_id) = current_instance_id {
-                if let Err(e) = untag_self_as_worker(&ec2_client, instance_id).await {
-                    warn!("⚠️  Failed to untag self: {}", e);
-                }
+            if let Err(e) = untag_self_as_worker(&ec2_client, &current_instance_id).await {
+                warn!("⚠️  Failed to untag self: {}", e);
             }
 
             vllm.stop().await?;
