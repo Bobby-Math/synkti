@@ -60,6 +60,10 @@ pub enum OrchestratorError {
     /// Configuration error
     #[error("Configuration error: {0}")]
     Config(String),
+
+    /// Generic AWS service error (for SSM, etc.)
+    #[error("AWS service error: {0}")]
+    AwsService(String),
 }
 
 impl OrchestratorError {
@@ -89,5 +93,13 @@ impl OrchestratorError {
         aws_sdk_ec2::Error: From<E>,
     {
         Self::Aws(aws_sdk_ec2::Error::from(err))
+    }
+
+    /// Convert from generic AWS SDK error
+    pub fn from_aws<E>(err: E) -> Self
+    where
+        E: std::fmt::Display,
+    {
+        Self::AwsService(err.to_string())
     }
 }

@@ -79,7 +79,10 @@ pub use assign::{
 pub use error::{OrchestratorError, Result};
 
 // Instance management
-pub use instance::{create_ec2_client, Ec2Instance, InstanceSpec, InstanceState, DEFAULT_REGION};
+pub use instance::{
+    create_ec2_client, get_gpu_ami, get_standard_ami, is_gpu_instance_type, list_workers,
+    terminate_worker, Ec2Instance, InstanceSpec, InstanceState, DEFAULT_REGION,
+};
 
 // Spot monitoring
 pub use monitor::{SpotInterruptionNotice, SpotMonitor, GRACE_PERIOD_SECONDS};

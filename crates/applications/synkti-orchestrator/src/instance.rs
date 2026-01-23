@@ -16,7 +16,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Default AWS region
 pub const DEFAULT_REGION: &str = "us-east-1";
@@ -452,6 +452,173 @@ impl Ec2Instance {
         info!("Instance {} termination initiated", self.id);
         Ok(())
     }
+}
+
+/// Get the ECS GPU-optimized AMI ID for the current region
+///
+/// Uses SSM parameter to get the latest AMI with NVIDIA drivers
+pub async fn get_gpu_ami(_client: &Client, region: &str) -> Result<String> {
+    use aws_sdk_ssm::Client as SsmClient;
+
+    let config = aws_config::defaults(BehaviorVersion::latest())
+        .region(Region::new(region.to_string()))
+        .load()
+        .await;
+
+    let ssm_client = SsmClient::new(&config);
+
+    ssm_client
+        .get_parameter()
+        .name("/aws/service/ecs/optimized-ami/amazon-linux-2023/gpu/recommended/image_id")
+        .send()
+        .await
+        .map_err(OrchestratorError::from_aws)
+        .and_then(|r| {
+            r.parameter
+                .and_then(|p| p.value)
+                .ok_or_else(|| OrchestratorError::Config("GPU AMI not found in SSM".to_string()))
+        })
+}
+
+/// Get the standard AL2023 AMI ID for the current region
+pub async fn get_standard_ami(client: &Client, _region: &str) -> Result<String> {
+    let response = client
+        .describe_images()
+        .owners("amazon")
+        .filters(
+            aws_sdk_ec2::types::Filter::builder()
+                .name("name")
+                .values("al2023-ami-2023.*-x86_64")
+                .build(),
+        )
+        .filters(
+            aws_sdk_ec2::types::Filter::builder()
+                .name("virtualization-type")
+                .values("hvm")
+                .build(),
+        )
+        .send()
+        .await
+        .map_err(OrchestratorError::from_ec2)?;
+
+    let images = response
+        .images
+        .ok_or_else(|| OrchestratorError::Config("No images in response".to_string()))?;
+
+    images
+        .first()
+        .and_then(|img| img.image_id.clone())
+        .ok_or_else(|| OrchestratorError::Config("No AL2023 AMI found".to_string()))
+}
+
+/// List all worker instances for a given project (by tag)
+pub async fn list_workers(client: &Client, project_name: &str) -> Result<Vec<Ec2Instance>> {
+    debug!("Listing workers for project: {}", project_name);
+
+    let response = client
+        .describe_instances()
+        .filters(
+            aws_sdk_ec2::types::Filter::builder()
+                .name("tag:SynktiCluster")
+                .values(project_name)
+                .build(),
+        )
+        .filters(
+            aws_sdk_ec2::types::Filter::builder()
+                .name("tag:SynktiRole")
+                .values("worker")
+                .build(),
+        )
+        .send()
+        .await
+        .map_err(OrchestratorError::from_ec2)?;
+
+    let mut instances = Vec::new();
+
+    for reservation in response.reservations() {
+        for inst in reservation.instances() {
+            let instance_type = inst
+                .instance_type
+                .as_ref()
+                .map(|t| t.as_str())
+                .unwrap_or("unknown");
+
+            // Estimate GPU memory for this instance type
+            let gpu_memory_gb = estimate_gpu_memory(instance_type);
+            let network_bandwidth = estimate_network_bandwidth(instance_type);
+
+            match Ec2Instance::from_aws_instance(inst, gpu_memory_gb, network_bandwidth) {
+                Ok(ec2_inst) => instances.push(ec2_inst),
+                Err(e) => warn!("Failed to parse instance: {}", e),
+            }
+        }
+    }
+
+    Ok(instances)
+}
+
+/// Terminate a worker instance by ID
+pub async fn terminate_worker(client: &Client, instance_id: &str) -> Result<()> {
+    info!("Terminating worker instance: {}", instance_id);
+
+    client
+        .terminate_instances()
+        .instance_ids(instance_id)
+        .send()
+        .await
+        .map_err(OrchestratorError::from_ec2)?;
+
+    info!("Worker {} termination initiated", instance_id);
+    Ok(())
+}
+
+/// Estimate GPU memory based on instance type
+fn estimate_gpu_memory(instance_type: &str) -> f64 {
+    match instance_type {
+        t if t.starts_with("g4dn.xlarge") || t.starts_with("g4dn.2xlarge") => 16.0,
+        t if t.starts_with("g4dn.4xlarge") || t.starts_with("g4dn.8xlarge") => 16.0,
+        t if t.starts_with("g4dn.16xlarge") => 16.0,
+        t if t.starts_with("g5.xlarge") || t.starts_with("g5.2xlarge") => 24.0,
+        t if t.starts_with("g5.4xlarge") || t.starts_with("g5.8xlarge") => 24.0,
+        t if t.starts_with("g5.12xlarge") || t.starts_with("g5.16xlarge") => 24.0,
+        t if t.starts_with("g5.24xlarge") || t.starts_with("g5.48xlarge") => 24.0,
+        t if t.starts_with("g6") => 24.0,
+        t if t.starts_with("p3.2") => 16.0,
+        t if t.starts_with("p3.8") => 64.0,
+        t if t.starts_with("p3.16") => 128.0,
+        t if t.starts_with("p3dn") => 256.0,
+        t if t.starts_with("p4d") => 320.0,
+        t if t.starts_with("p4de") => 640.0,
+        t if t.starts_with("p5") => 640.0,
+        _ => 0.0, // CPU instances have no GPU memory
+    }
+}
+
+/// Estimate network bandwidth based on instance type (Gbps)
+fn estimate_network_bandwidth(instance_type: &str) -> f64 {
+    match instance_type {
+        t if t.starts_with("g4dn") => 10.0,
+        t if t.starts_with("g5") => 10.0,
+        t if t.starts_with("g6") => 10.0,
+        t if t.starts_with("p3") => 10.0,
+        t if t.starts_with("p3dn") => 25.0,
+        t if t.starts_with("p4d") => 25.0,
+        t if t.starts_with("p4de") => 25.0,
+        t if t.starts_with("p5") => 25.0,
+        _ => 10.0, // Default to 10 Gbps
+    }
+}
+
+/// Check if an instance type is a GPU instance
+pub fn is_gpu_instance_type(instance_type: &str) -> bool {
+    instance_type.starts_with("g4dn")
+        || instance_type.starts_with("g5")
+        || instance_type.starts_with("g6")
+        || instance_type.starts_with("p3")
+        || instance_type.starts_with("p3dn")
+        || instance_type.starts_with("p4d")
+        || instance_type.starts_with("p4de")
+        || instance_type.starts_with("p5")
 }
 
 /// Predefined instance specs for common GPU instances
