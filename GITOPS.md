@@ -9,12 +9,11 @@ Bootstrap ONCE from the local machine, then GitOps takes over forever.
 1. Set up IAM permissions for the user in the AWS Console.
 2. Run `terraform apply` from your local machine to create the infrastructure:
    - S3 buckets (permanent resources, manual cleanup required)
-   - EC2 instance for deploying the orchestrator
-3. Deploy the orchestrator using one of:
-   - **Manual**: Log into the instance via AWS Systems Manager Session Manager and deploy
-   - **GitOps**: Push to trigger automated deployment
+   - IAM roles for spot workers
+3. Deploy spot workers with the orchestrator binary already in S3
+4. Each worker auto-starts the orchestrator on boot via user_data
 
-After bootstrap, all deployments are managed through GitOps.
+After bootstrap, infrastructure updates are managed through GitOps.
 
 ---
 
@@ -33,45 +32,40 @@ chmod +x scripts/bootstrap.sh
 ```
 
 This does:
-1. Builds `synkti-orchestrator` binary
+1. Builds `synkti` binary
 2. Runs `terraform apply` to create infrastructure
-3. Uploads binary to permanent S3 bucket
+3. Uploads binary to permanent S3 bucket: `s3://{project}-models/bin/synkti`
 4. (Optional) Uploads model weights to S3
 
-### Step 2: Update user_data Binary Location
-
-Edit `infra/main.tf` and uncomment/update the binary download:
-
-```hcl
-user_data = <<-EOF
-  ...
-  # Download orchestrator from S3
-  aws s3 cp s3://my-prod-models/bin/synkti-orchestrator /usr/local/bin/synkti-orchestrator
-  chmod +x /usr/local/bin/synkti-orchestrator
-  ...
-EOF
-```
-
-### Step 3: Push to Trigger Deploy
+### Step 2: Launch Spot Workers
 
 ```bash
-git add infra/
-git commit -m "Configure production deployment"
-git push
+# Using the synkti CLI (auto-creates infra if needed)
+./scripts/target/release/synkti --project-name my-prod
+
+# Or launch via terraform manually
+cd infra
+terraform apply -var="project_name=my-prod" -var="worker_count=2"
 ```
 
-GitHub Actions automatically runs `terraform apply`.
-
-### Step 4: Verify
+### Step 3: Verify
 
 ```bash
-# Check orchestrator is running
-aws ssm start-session \
-  --target $(terraform output -raw control_plane_instance_ids | head -1) \
-  --region us-east-1
+# Check that nodes are tagged and discoverable
+aws ec2 describe-instances \
+  --filters "Name=tag:SynktiCluster,Values=my-prod" \
+  --query "Reservations[].Instances[].InstanceId" \
+  --output text
+
+# Connect to any worker via SSM
+INSTANCE_ID=$(aws ec2 describe-instances \
+  --filters "Name=tag:SynktiCluster,Values=my-prod" \
+  --query "Reservations[0].Instances[0].InstanceId" \
+  --output text)
+
+aws ssm start-session --target $INSTANCE_ID --region us-east-1
 
 # Inside instance:
-systemctl status synkti
 journalctl -u synkti -f
 ```
 
@@ -79,7 +73,7 @@ journalctl -u synkti -f
 
 ## Every Subsequent Time (GitOps)
 
-After the initial bootstrap, **never manually SSH** again.
+After the initial bootstrap, **never manually SSH** for deployments.
 
 ### Make a Change
 
@@ -89,21 +83,21 @@ vim infra/variables.tf
 
 # Commit and push
 git add .
-git commit -m "Upgrade control plane to t3.large"
+git commit -m "Add more spot workers"
 git push
 ```
 
 ### GitHub Actions Handles the Rest
 
 ```
-Push → GitHub Actions → terraform apply → Rolling update
+Push → GitHub Actions → terraform apply → New workers join cluster
 ```
 
 Zero manual intervention.
 
 ---
 
-## Architecture
+## Architecture: P2P Choreography
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -112,35 +106,75 @@ Zero manual intervention.
 │  │     Code    │────→│ GitHub Act   │────→│    Terraform │   │
 │  │  (main.rs)  │     │    (.yml)    │     │     apply    │   │
 │  └─────────────┘     └──────────────┘     └──────────────┘   │
-│                             │                      │          │
-│                             ▼                      ▼          │
-│  ┌─────────────┐     ┌──────────────┐     ┌──────────────┐   │
-│  │  Security   │     │     Plan     │     │   Comments   │   │
-│  │   Scan      │     │   (PR only)  │     │   (PR only)  │   │
-│  └─────────────┘     └──────────────┘     └──────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                           AWS                                   │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  Control Plane Instance (t3.medium)                     │  │
-│  │  ┌────────────────────────────────────────────────────┐ │  │
-│  │  │  systemd → synkti-orchestrator → vLLM container  │ │  │
-│  │  └────────────────────────────────────────────────────┘ │  │
-│  │            ↓ Auto-starts on boot (user_data)           │  │
-│  │  ┌────────────────────────────────────────────────────┐ │  │
-│  │  │  Downloads:                                         │ │  │
-│  │  │  - Binary from s3://{project}-models/bin/          │ │  │
-│  │  │  - Model from s3://{project}-models/llama-2-7b/    │ │  │
-│  │  └────────────────────────────────────────────────────┘ │  │
-│  └──────────────────────────────────────────────────────────┘  │
 │                                                                 │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐    │
-│  │ GPU Workers  │  │ S3: Checkpts │  │ S3: Models       │    │
-│  │ (via CLI)    │  │  (ephemeral) │  │   (PERMANENT)    │    │
-│  └──────────────┘  └──────────────┘  └──────────────────┘    │
+│   ┌──────────────┐        ┌──────────────┐        ┌───────────┐│
+│   │  Spot Node A │◄──────►│  Spot Node B │◄──────►│ Spot Node ││
+│   │  g4dn.xlarge │  P2P   │  g4dn.xlarge │  P2P   │    C     ││
+│   │              │        │              │        │           ││
+│   │  ┌────────┐  │        │  ┌────────┐  │        │ ┌───────┐││
+│   │  │synkti  │  │        │  │synkti  │  │        │ │synkti│││
+│   │  │orchest.│  │        │  │orchest.│  │        │ │orch. │││
+│   │  │  +     │  │        │  │  +     │  │        │ │  +   │││
+│   │  │ vLLM   │  │        │  │ vLLM   │  │        │ │ vLLM │││
+│   │  └────────┘  │        │  └────────┘  │        │ └───────┘││
+│   │              │        │              │        │           ││
+│   │  EC2 tags:   │        │  EC2 tags:   │        │ EC2 tags: ││
+│   │  SynktiCluster│        │  SynktiCluster│       │SynktiCluster│
+│   │  SynktiRole= │        │  SynktiRole= │        │SynktiRole=││
+│   │  worker      │        │  worker      │        │worker    ││
+│   └──────────────┘        └──────────────┘        └───────────┘│
+│          │                        │                       │       │
+│          └────────────────────────┴───────────────────────┘   │
+│                             │                                   │
+│                             ▼                                   │
+│                  Peer Discovery (EC2 tags)                      │
+│                  Each node self-governing                       │
+│                  No central control plane                       │
+│                                                                 │
+│  ┌──────────────┐           ┌───────────────────┐              │
+│  │ S3: Models   │           │ S3: Checkpoints   │              │
+│  │  (PERMANENT) │           │  (ephemeral)      │              │
+│  │              │           │                   │              │
+│  │ - synkti bin │           │ - KV cache        │              │
+│  │ - qwen2.5-7b │           │ - state snapshots  │              │
+│  └──────────────┘           └───────────────────┘              │
 └─────────────────────────────────────────────────────────────────┘
+```
+
+**Key difference from centralized orchestrators:**
+
+| Traditional (K8s) | Synkti (P2P) |
+|-------------------|---------------|
+| Single control plane (API server, etcd) | No control plane |
+| Central scheduler | Each node self-assigns |
+| State drift (model ≠ reality) | Truth at the edge |
+| SPOF at control plane | No SPOF |
+| Reconciliation overhead | No reconciliation |
+
+---
+
+## How P2P Discovery Works
+
+Each node on startup:
+
+1. **Tags itself** with `SynktiCluster={project}` and `SynktiRole=worker`
+2. **Discovers peers** by querying EC2 for instances with matching tags
+3. **Refreshes peer list** every 30 seconds
+4. **Untags itself** on graceful shutdown
+
+```rust
+// What each node does on startup
+let my_id = get_instance_id().await?;
+tag_self_as_worker(&ec2, &my_id, "my-prod").await?;
+
+// Find peers
+let peers = discover_peers("my-prod").await?;
+// → Returns all instances with SynktiCluster=my-prod
 ```
 
 ---
@@ -199,24 +233,42 @@ synkti/
 │   └── workflows/
 │       └── deploy.yml        # GitOps automation
 ├── infra/
-│   ├── main.tf                # Infrastructure (with user_data)
+│   ├── main.tf                # Infrastructure (IAM, S3, SGs)
 │   ├── variables.tf           # Configuration
 │   ├── outputs.tf             # Output values
-│   └── versions.tf            # Provider versions
+│   └── user-data.sh           # Worker boot script
 ├── scripts/
 │   └── bootstrap.sh          # One-time setup
 └── crates/
-    └── applications/
-        └── synkti-orchestrator/
-            └── src/
-                └── main.rs    # Orchestrator binary
+   └── applications/
+       └── synkti-orchestrator/
+           └── src/
+               ├── main.rs    # CLI entry point
+               ├── discovery.rs  # P2P peer discovery
+               ├── failover.rs   # Stateless failover
+               ├── drain.rs      # Graceful request drain
+               └── ...
 ```
 
 ---
 
 ## Troubleshooting
 
-### Instance not starting orchestrator?
+### Workers not discovering each other?
+
+```bash
+# Check EC2 tags
+aws ec2 describe-tags \
+  --filters "Name=resource-id,Values=i-xxxxxxxx" \
+  --query "Tags[?Key==`SynktiCluster`]" \
+  --region us-east-1
+
+# Verify all workers have:
+# - SynktiCluster = <project-name>
+# - SynktiRole = worker
+```
+
+### Orchestrator not starting?
 
 ```bash
 # Connect via SSM
@@ -242,4 +294,24 @@ systemctl restart synkti
 
 1. Verify models bucket name: `terraform output models_bucket_name`
 2. Check IAM permissions include S3 read access
-3. Verify S3 path in `--model-s3` flag
+3. Verify S3 path in user-data.sh
+
+---
+
+## Stopping a Cluster
+
+Since there's no central control plane, stop by terminating instances:
+
+```bash
+# Find all instances in cluster
+aws ec2 describe-instances \
+  --filters "Name=tag:SynktiCluster,Values=my-prod" \
+  --query "Reservations[].Instances[].InstanceId" \
+  --output text | xargs -I {} aws ec2 terminate-instances --instance-ids {}
+
+# Or destroy infra (includes IAM, S3, etc.)
+cd infra
+terraform destroy -var="project_name=my-prod"
+
+# Note: S3 models bucket is NOT destroyed (prevent_destroy=true)
+```
