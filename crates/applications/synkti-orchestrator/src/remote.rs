@@ -206,6 +206,7 @@ impl SsmExecutor {
     /// Start a vLLM container on a remote instance
     ///
     /// Generates and executes the docker run command via SSM.
+    /// Detects GPU availability on the remote instance and includes GPU flags only if present.
     pub async fn start_vllm_container(
         &self,
         instance_id: &str,
@@ -220,37 +221,40 @@ impl SsmExecutor {
         let stop_cmd = format!("docker stop {} 2>/dev/null || true", container_name);
         let rm_cmd = format!("docker rm {} 2>/dev/null || true", container_name);
 
-        // Build docker run command
-        let mut docker_args = vec![
-            "docker run -d".to_string(),
-            "--gpus all".to_string(),
-            format!("-p {}:{}", config.port, config.port),
-            format!("--name {}", container_name),
-            format!(
-                "--env VLLM_USAGE={}%",
-                (config.gpu_memory_utilization * 100.0) as i32
-            ),
-        ];
+        // Check for GPU on remote instance first
+        let gpu_check = "ls /dev/nvidia0 >/dev/null 2>&1 && echo 'gpu' || echo 'no-gpu'";
 
-        docker_args.push(config.image.clone());
-        docker_args.push(format!("--model {}", config.model));
-        docker_args.push(format!("--port {}", config.port));
-        docker_args.push(format!("--max-model-len {}", config.max_model_len));
-
-        if config.tensor_parallel_size > 1 {
-            docker_args.push(format!("--tensor-parallel-size {}", config.tensor_parallel_size));
-        }
-
-        if let Some(ref quant) = config.quantization {
-            docker_args.push(format!("--quantization {}", quant));
-        }
-
-        let docker_cmd = docker_args.join(" ");
+        // Build docker run command (GPU flags added conditionally)
+        // We use a shell script that checks for GPU and adds --gpus all only if present
+        let docker_script = format!(
+            r#"if [ -e /dev/nvidia0 ] || command -v nvidia-smi >/dev/null 2>&1; then
+  docker run -d --gpus all -p {port} --name {name} --env VLLM_USAGE={gpu_mem}% {image} --model {model} --port {port} --max-model-len {max_len} {extra_args}
+else
+  echo "Warning: No GPU detected, running in CPU mode" >&2
+  docker run -d -p {port} --name {name} {image} --model {model} --port {port} --max-model-len {max_len} {extra_args}
+fi"#,
+            port = config.port,
+            name = container_name,
+            gpu_mem = (config.gpu_memory_utilization * 100.0) as i32,
+            image = config.image,
+            model = config.model,
+            max_len = config.max_model_len,
+            extra_args = {
+                let mut extra = String::new();
+                if config.tensor_parallel_size > 1 {
+                    extra.push_str(&format!("--tensor-parallel-size {} ", config.tensor_parallel_size));
+                }
+                if let Some(ref quant) = config.quantization {
+                    extra.push_str(&format!("--quantization {} ", quant));
+                }
+                extra
+            }
+        );
 
         let commands = vec![
             stop_cmd,
             rm_cmd,
-            docker_cmd,
+            docker_script,
         ];
 
         info!(

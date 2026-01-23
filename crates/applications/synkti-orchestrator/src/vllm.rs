@@ -130,18 +130,32 @@ impl VllmConfig {
         self
     }
 
+    /// Check if GPU is available on this system
+    fn has_gpu() -> bool {
+        // Check for nvidia-smi or GPU devices
+        std::path::Path::new("/dev/nvidia0").exists()
+            || std::path::Path::new("/usr/bin/nvidia-smi").exists()
+            || std::path::Path::new("/usr/local/bin/nvidia-smi").exists()
+    }
+
     /// Build Docker run arguments
     fn docker_run_args(&self) -> Vec<String> {
         let mut args = vec![
             "run".to_string(),
             "-d".to_string(),
-            "--gpus".to_string(),
-            "all".to_string(),
             "-p".to_string(),
             format!("{}:{}", self.port, self.port),
-            "--env".to_string(),
-            format!("VLLM_USAGE={}%", self.gpu_memory_utilization * 100.0),
         ];
+
+        // Only add GPU flags if GPU is available
+        if Self::has_gpu() {
+            args.push("--gpus".to_string());
+            args.push("all".to_string());
+            args.push("--env".to_string());
+            args.push(format!("VLLM_USAGE={}%", self.gpu_memory_utilization * 100.0));
+        } else {
+            tracing::warn!("⚠️  No GPU detected, running in CPU mode (vLLM will be slow or may not work)");
+        }
 
         if let Some(ref name) = self.container_name {
             args.push("--name".to_string());

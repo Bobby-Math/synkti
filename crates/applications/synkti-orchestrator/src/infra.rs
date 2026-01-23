@@ -100,29 +100,22 @@ impl TerraformRunner {
     /// Parse all terraform outputs into structured data.
     pub fn parse_outputs(&self) -> Result<TerraformOutputs> {
         Ok(TerraformOutputs {
-            control_plane_instance_ids: self.get_output("control_plane_instance_ids")?,
-            control_plane_public_ips: self.get_output("control_plane_public_ips")?,
             worker_instance_profile_name: self.get_output("worker_instance_profile_name")?,
             worker_sg_id: self.get_output("worker_sg_id")?,
             checkpoint_bucket_name: self.get_output("checkpoint_bucket_name")?,
             models_bucket_name: self.get_output("models_bucket_name")?,
-            connect_command: self.get_output("connect_to_control_plane")?,
             launch_command: self.get_output("launch_worker_command")?,
         })
     }
 
     /// Show infrastructure status by parsing outputs.
     pub fn status(&self) -> Result<InfraStatus> {
-        let instance_ids = self.get_output("control_plane_instance_ids")?;
-        let public_ips = self.get_output("control_plane_public_ips")?;
         let worker_role = self.get_output("worker_instance_profile_name")?;
         let sg_id = self.get_output("worker_sg_id")?;
         let bucket = self.get_output("checkpoint_bucket_name")?;
 
         Ok(InfraStatus {
             project_name: self.project_name.clone(),
-            control_plane_instance_ids: instance_ids.lines().map(|s| s.to_string()).collect(),
-            control_plane_public_ips: public_ips.lines().map(|s| s.to_string()).collect(),
             worker_instance_profile_name: worker_role,
             worker_sg_id: sg_id,
             checkpoint_bucket_name: bucket,
@@ -134,13 +127,10 @@ impl TerraformRunner {
 /// Terraform output values.
 #[derive(Debug, Clone)]
 pub struct TerraformOutputs {
-    pub control_plane_instance_ids: String,
-    pub control_plane_public_ips: String,
     pub worker_instance_profile_name: String,
     pub worker_sg_id: String,
     pub checkpoint_bucket_name: String,
     pub models_bucket_name: String,
-    pub connect_command: String,
     pub launch_command: String,
 }
 
@@ -148,8 +138,6 @@ pub struct TerraformOutputs {
 #[derive(Debug, Clone)]
 pub struct InfraStatus {
     pub project_name: String,
-    pub control_plane_instance_ids: Vec<String>,
-    pub control_plane_public_ips: Vec<String>,
     pub worker_instance_profile_name: String,
     pub worker_sg_id: String,
     pub checkpoint_bucket_name: String,
@@ -171,42 +159,24 @@ pub fn remove_owner_marker(project_name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Check if this process is the owner of the infrastructure.
+/// Check if infrastructure exists for this project.
+/// Returns true if the owner marker file exists (regardless of which process created it).
+/// This allows bootstrap (one process) to create infra and synkti (another process) to recognize it.
 pub fn is_owner(project_name: &str) -> bool {
     let marker_path = format!("/tmp/synkti-{}.owner", project_name);
-    if let Ok(content) = std::fs::read_to_string(&marker_path) {
-        if let Ok(pid) = content.trim().parse::<u32>() {
-            return pid == std::process::id();
-        }
-    }
-    false
+    std::path::Path::new(&marker_path).exists()
 }
 
-/// Check if the infrastructure has a stale owner (process no longer running).
-pub fn has_stale_owner(project_name: &str) -> bool {
-    let marker_path = format!("/tmp/synkti-{}.owner", project_name);
-    if let Ok(content) = std::fs::read_to_string(&marker_path) {
-        if let Ok(pid) = content.trim().parse::<u32>() {
-            // Try to check if process exists by sending signal 0
-            // On Linux, we can check /proc
-            if std::path::Path::new(&format!("/proc/{}", pid)).exists() {
-                // Process is still running
-                return false;
-            } else {
-                // Process no longer exists, stale marker
-                return true;
-            }
-        }
-    }
+/// Check if the infrastructure has a stale owner.
+/// With the new marker design (just checks file existence), there are no stale owners.
+/// This function always returns false and is kept for compatibility.
+pub fn has_stale_owner(_project_name: &str) -> bool {
     false
 }
 
 /// Clean up stale owner marker.
-pub fn cleanup_stale_owner(project_name: &str) -> Result<()> {
-    if has_stale_owner(project_name) {
-        let marker_path = format!("/tmp/synkti-{}.owner", project_name);
-        std::fs::remove_file(&marker_path).ok();
-    }
+/// With the new marker design, this is a no-op kept for compatibility.
+pub fn cleanup_stale_owner(_project_name: &str) -> Result<()> {
     Ok(())
 }
 
