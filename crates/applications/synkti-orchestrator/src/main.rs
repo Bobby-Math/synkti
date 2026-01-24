@@ -52,12 +52,66 @@ use aws_sdk_ec2::Client as Ec2Client;
 struct SelfTerminatingGuard {
     instance_id: String,
     region: String,
+    project_name: Option<String>,
 }
 
 impl SelfTerminatingGuard {
     /// Create a new self-terminating guard.
-    fn new(instance_id: String, region: String) -> Self {
-        Self { instance_id, region }
+    fn new(instance_id: String, region: String, project_name: Option<String>) -> Self {
+        Self { instance_id, region, project_name }
+    }
+
+    /// Upload logs to S3 for post-mortem diagnosis (synchronous, runs in Drop)
+    fn upload_logs(&self) {
+        let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+        let s3_prefix = if let Some(project) = &self.project_name {
+            format!("s3://{}-checkpoints/death-logs/{}", project, self.instance_id)
+        } else {
+            format!("s3://synkti-death-logs/{}", self.instance_id)
+        };
+
+        // Upload RAII log
+        let _ = std::process::Command::new("aws")
+            .args([
+                "s3", "cp",
+                "/var/log/synkti-raii.log",
+                &format!("{}/raii-{}.log", s3_prefix, timestamp),
+                "--region", &self.region,
+            ])
+            .output();
+
+        // Upload debug log if exists
+        let _ = std::process::Command::new("aws")
+            .args([
+                "s3", "cp",
+                "/var/log/synkti-debug.log",
+                &format!("{}/debug-{}.log", s3_prefix, timestamp),
+                "--region", &self.region,
+            ])
+            .output();
+
+        // Upload journal logs
+        let _ = std::process::Command::new("journalctl")
+            .args(["-u", "synkti", "--no-pager"])
+            .output()
+            .and_then(|output| {
+                std::process::Command::new("aws")
+                    .args([
+                        "s3", "cp",
+                        "-", &format!("{}/journal-{}.log", s3_prefix, timestamp),
+                        "--region", &self.region,
+                    ])
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .spawn()
+                    .and_then(|mut child| {
+                        use std::io::Write;
+                        if let Some(mut stdin) = child.stdin.take() {
+                            let _ = stdin.write_all(&output.stdout);
+                        }
+                        child.wait()
+                    })
+            });
     }
 
     /// Terminate this instance.
@@ -90,11 +144,46 @@ impl SelfTerminatingGuard {
 
 impl Drop for SelfTerminatingGuard {
     fn drop(&mut self) {
-        if std::thread::panicking() {
-            error!("💥 PANIC! Self-terminating to return borrowed resources");
-        } else {
-            info!("👋 Synkti exiting. Self-terminating to return borrowed resources");
+        // Check if RAII is disabled for debugging
+        if std::env::var("SYNKTI_NO_RAII").is_ok() {
+            let msg = "🔧 RAII DISABLED (SYNKTI_NO_RAII set). Not terminating instance.";
+            eprintln!("{}", msg);
+            let _ = std::fs::write("/var/log/synkti-raii.log", format!("{}\n", msg));
+            return;
         }
+
+        let msg = if std::thread::panicking() {
+            "💥 PANIC! Self-terminating to return borrowed resources"
+        } else {
+            "👋 Synkti exiting. Self-terminating to return borrowed resources"
+        };
+
+        // Write to multiple places to ensure it's captured:
+        // 1. stderr (goes to journald via systemd)
+        eprintln!("{}", msg);
+
+        // 2. Dedicated RAII log file (synchronous, will survive termination)
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let log_entry = format!("{} | Instance: {} | Region: {} | {}\n",
+            timestamp, self.instance_id, self.region, msg);
+
+        let _ = std::fs::write("/var/log/synkti-raii.log", &log_entry);
+
+        // 3. Also append to debug log if it exists
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/var/log/synkti-debug.log")
+            .and_then(|mut f| {
+                use std::io::Write;
+                f.write_all(log_entry.as_bytes())
+            });
+
+        // 4. Upload logs to S3 for post-mortem diagnosis
+        eprintln!("📤 Uploading death logs to S3...");
+        self.upload_logs();
+
+        // Now terminate
         self.terminate();
     }
 }
@@ -255,14 +344,46 @@ enum WorkerAction {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize tracing
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "synkti=info,info".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    // Check if running on EC2 by looking for AWS hypervisor signature
+    let is_ec2 = std::path::Path::new("/sys/hypervisor/uuid").exists()
+        && std::fs::read_to_string("/sys/hypervisor/uuid")
+            .map(|s| s.contains("ec2"))
+            .unwrap_or(false);
+
+    if is_ec2 {
+        // On EC2 - enable file logging
+        let file_appender = tracing_appender::rolling::never("/var/log", "synkti-debug.log");
+        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| "synkti=debug,info".into()),
+            )
+            .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
+            .with(tracing_subscriber::fmt::layer().with_writer(non_blocking))
+            .init();
+    } else {
+        // Local - console only
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| "synkti=info,info".into()),
+            )
+            .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
+            .init();
+    }
+
+    // Log startup
+    info!("========================================");
+    info!("Synkti binary starting");
+    info!("Version: {}", env!("CARGO_PKG_VERSION"));
+    info!("Args: {:?}", std::env::args().collect::<Vec<_>>());
+    if is_ec2 {
+        info!("Environment: EC2 (file logging enabled)");
+    } else {
+        info!("Environment: Local");
+    }
+    info!("========================================");
 
     let cli = Cli::parse();
 
@@ -309,11 +430,15 @@ async fn main() -> anyhow::Result<()> {
         anyhow::anyhow!("--project-name required")
     })?;
 
+    info!("🚀 Synkti starting with project: {}", project);
+    info!("📍 Region: {}", cli.region);
+
     // Detect context: are we running on EC2 or locally?
     let on_ec2 = is_running_on_ec2().await;
 
     if on_ec2 {
         info!("🖥️  Running on EC2 - Orchestrator Mode");
+        info!("▶️  Starting orchestrator...");
         run_orchestrator(
             project,
             cli.region,
@@ -518,7 +643,8 @@ async fn handle_worker(
                     content = content.replace("${project_name}", &project);
                     content = content.replace("${models_bucket}", &models_bucket);
                     content = content.replace("${region}", &region);
-                    content = content.replace("${synkti_binary_s3_path}", &format!("s3://{}/bin/synkti", models_bucket));
+                    // Use dedicated binaries bucket for synkti binary
+                    content = content.replace("${synkti_binary_s3_path}", &format!("s3://{}-binaries/synkti", project));
                     content = content.replace("${model_s3_path}", &format!("s3://{}/qwen2.5-7b/", models_bucket));
                     content = content.replace("${huggingface_model}", "Qwen/Qwen2.5-7B-Instruct");
 
@@ -1054,24 +1180,15 @@ async fn run_orchestrator(
     // RAII: If this synkti process exits or crashes, terminate this instance
     // This embodies the principle: synkti is a responsible intelligence that
     // borrows resources and returns them promptly.
-    let _self_guard = SelfTerminatingGuard::new(current_instance_id.clone(), region.clone());
+    let _self_guard = SelfTerminatingGuard::new(current_instance_id.clone(), region.clone(), Some(project.clone()));
     info!("🛡️  RAII active: This instance will auto-terminate if synkti exits");
 
-    // Ensure infrastructure exists
-    let terraform = TerraformRunner::new(&infra_dir, &project);
-    if !is_owner(&project) {
-        info!("🏗️  Infrastructure not found, creating...");
-        terraform.init()?;
-        let _ = cleanup_stale_owner(&project);
-        terraform.apply()?;
-        create_owner_marker(&project)?;
-        info!("✅ Infrastructure ready");
-    }
-
-    // Get infrastructure outputs
-    let outputs = terraform.parse_outputs()?;
-    info!("📋 Models bucket: {}", outputs.models_bucket_name);
-    info!("🔐 Worker profile: {}", outputs.worker_instance_profile_name);
+    // When running on EC2 worker, infrastructure is assumed to exist
+    // (created by user via terraform from local machine)
+    // Derive bucket names from project name
+    let models_bucket = format!("{}-models", project);
+    info!("📋 Models bucket: {} (derived from project)", models_bucket);
+    info!("🔐 Worker profile: {}-worker (derived from project)", project);
 
     // Build AWS config
     let aws_config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
@@ -1110,7 +1227,7 @@ async fn run_orchestrator(
 
     // Model configuration
     let model = "Qwen/Qwen2.5-7B-Instruct".to_string();
-    let model_s3 = Some(format!("s3://{}/qwen2.5-7b/", outputs.models_bucket_name));
+    let model_s3 = Some(format!("s3://{}/qwen2.5-7b/", models_bucket));
 
     // vLLM configuration
     let vllm_config = VllmConfig {
@@ -1247,32 +1364,23 @@ async fn run_orchestrator(
         }
     });
 
-    // Wait for Ctrl+C or monitor task to complete
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
-            info!("🛑 Shutting down...");
-            monitor_task.abort();
+    // Wait for monitor task to complete indefinitely
+    // On EC2 (systemd), there's no terminal for Ctrl+C, so we just wait forever
+    info!("✅ Synkti orchestrator running. Will run until spot termination or explicit shutdown.");
+    info!("💤 Use 'journalctl -u synkti -f' to view logs");
 
-            // Untag self from cluster before shutdown
-            info!("🏷️  Removing worker tags...");
-            if let Err(e) = untag_self_as_worker(&ec2_client, &current_instance_id).await {
-                warn!("⚠️  Failed to untag self: {}", e);
-            }
-
-            vllm.stop().await?;
-            info!("✅ Shutdown complete");
-        }
-        result = &mut monitor_task => {
-            info!("Monitor task ended: {:?}", result);
-
-            // Untag self from cluster
-            if let Err(e) = untag_self_as_worker(&ec2_client, &current_instance_id).await {
-                warn!("⚠️  Failed to untag self: {}", e);
-            }
-
-            vllm.stop().await?;
-        }
+    match monitor_task.await {
+        Ok(_) => info!("Monitor task ended gracefully"),
+        Err(e) => info!("Monitor task ended: {:?}", e),
     }
+
+    // Cleanup
+    info!("🏷️  Removing worker tags...");
+    if let Err(e) = untag_self_as_worker(&ec2_client, &current_instance_id).await {
+        warn!("⚠️  Failed to untag self: {}", e);
+    }
+
+    vllm.stop().await?;
 
     Ok(())
 }
