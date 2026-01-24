@@ -206,6 +206,15 @@ impl VllmContainer {
     pub async fn start(&mut self) -> Result<String> {
         info!("Starting vLLM container for model {}", self.config.model);
 
+        // Remove any existing container with the same name (crash recovery)
+        if let Some(ref name) = self.config.container_name {
+            info!("Checking for existing container named '{}'...", name);
+            let _ = AsyncCommand::new("docker")
+                .args(["rm", "-f", name])
+                .output()
+                .await;
+        }
+
         let args = self.config.docker_run_args();
 
         debug!("Docker run command: {:?}", args);
@@ -240,8 +249,8 @@ impl VllmContainer {
         let client = reqwest::Client::new();
         let health_url = format!("http://{}:{}/health", self.config.host, self.config.port);
 
-        for i in 0..30 {
-            // Wait up to 30 seconds
+        // Wait up to 5 minutes (300 seconds) - model download can take a while
+        for i in 0..300 {
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
             match client.get(&health_url).send().await {
@@ -250,16 +259,20 @@ impl VllmContainer {
                     return Ok(());
                 }
                 Ok(_) => {
-                    debug!("Waiting for vLLM to be ready... ({}/30)", i + 1);
+                    if (i + 1) % 30 == 0 {
+                        info!("Waiting for vLLM to be ready... ({}/300)", i + 1);
+                    }
                 }
                 Err(e) => {
-                    debug!("Health check failed: {}", e);
+                    if (i + 1) % 30 == 0 {
+                        debug!("Health check failed: {}", e);
+                    }
                 }
             }
         }
 
         Err(OrchestratorError::Docker(
-            "vLLM did not become ready within 30 seconds".to_string(),
+            "vLLM did not become ready within 5 minutes".to_string(),
         ))
     }
 
