@@ -6,8 +6,8 @@ use crate::error::{OrchestratorError, Result};
 use aws_config::BehaviorVersion;
 use aws_sdk_ec2::{
     types::{
-        IamInstanceProfileSpecification, Instance, InstanceMarketOptionsRequest, InstanceType,
-        MarketType, ResourceType, Tag, TagSpecification,
+        BlockDeviceMapping, IamInstanceProfileSpecification, Instance, InstanceMarketOptionsRequest,
+        InstanceType, MarketType, ResourceType, Tag, TagSpecification, EbsBlockDevice, VolumeType,
     },
     Client,
 };
@@ -94,10 +94,18 @@ pub struct InstanceSpec {
 
     /// IAM instance profile name (for SSM access, etc.)
     pub iam_instance_profile: Option<String>,
+
+    /// Root volume size in GB (default 100GB for ML workloads)
+    #[serde(default = "default_root_volume_size")]
+    pub root_volume_size_gb: i32,
 }
 
 fn default_instance_type() -> String {
     "g4dn.xlarge".to_string()
+}
+
+fn default_root_volume_size() -> i32 {
+    100 // 100GB default for ML workloads (Docker images + models)
 }
 
 impl Default for InstanceSpec {
@@ -114,6 +122,7 @@ impl Default for InstanceSpec {
             subnet_id: None,
             user_data: None,
             iam_instance_profile: None,
+            root_volume_size_gb: default_root_volume_size(),
         }
     }
 }
@@ -182,12 +191,30 @@ impl InstanceSpec {
         self
     }
 
+    /// Set root volume size in GB
+    pub fn with_root_volume_size(mut self, size_gb: i32) -> Self {
+        self.root_volume_size_gb = size_gb;
+        self
+    }
+
     /// Launch this instance spec as an EC2 instance
     pub async fn launch(&self, client: &Client, tags: Vec<(String, String)>) -> Result<Ec2Instance> {
         info!(
-            "Launching instance: type={}, ami={}",
-            self.instance_type, self.ami_id
+            "Launching instance: type={}, ami={}, root_volume={}GB",
+            self.instance_type, self.ami_id, self.root_volume_size_gb
         );
+
+        // Configure root volume (100GB default for ML workloads)
+        let root_device = BlockDeviceMapping::builder()
+            .device_name("/dev/xvda")
+            .ebs(
+                EbsBlockDevice::builder()
+                    .volume_size(self.root_volume_size_gb)
+                    .volume_type(VolumeType::Gp3)
+                    .delete_on_termination(true)
+                    .build()
+            )
+            .build();
 
         let mut run_req = client
             .run_instances()
@@ -201,6 +228,7 @@ impl InstanceSpec {
             .set_key_name(self.key_name.clone())
             .set_subnet_id(self.subnet_id.clone())
             .set_user_data(self.user_data.clone())
+            .block_device_mappings(root_device)
             .min_count(1)
             .max_count(1);
 
