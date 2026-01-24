@@ -72,6 +72,11 @@ resource "aws_iam_role" "worker" {
     Name      = "${var.project_name}-worker"
     ManagedBy = "Synkti"
     Project   = var.project_name
+    Lifecycle = "Permanent"
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
@@ -123,6 +128,10 @@ resource "aws_iam_role_policy" "worker_models_read" {
 resource "aws_iam_instance_profile" "worker" {
   name = "${var.project_name}-worker"
   role = aws_iam_role.worker.name
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # --- S3 Buckets ---
@@ -232,6 +241,11 @@ resource "aws_security_group" "worker" {
     Name      = "${var.project_name}-worker"
     ManagedBy = "Synkti"
     Project   = var.project_name
+    Lifecycle = "Permanent"
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
