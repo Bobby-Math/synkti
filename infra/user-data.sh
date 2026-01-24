@@ -68,6 +68,7 @@ Environment="REGION=${region}"
 Environment="MODELS_BUCKET=${models_bucket}"
 Environment="MODEL_S3_PATH=${model_s3_path}"
 Environment="HUGGINGFACE_MODEL=${huggingface_model}"
+# RAII is ENABLED - instance will self-terminate on panic/exit (this is a feature)
 ExecStart=/usr/local/bin/synkti --project-name ${project_name} --region ${region}
 Restart=always
 RestartSec=10
@@ -84,39 +85,10 @@ systemctl daemon-reload
 systemctl enable synkti.service
 systemctl start synkti.service
 
-# Start vLLM container (detects GPU automatically)
-echo "Starting vLLM container..."
-sleep 5  # Wait for synkti to initialize
-
-# Check for GPU and start vLLM
-if [ -e /dev/nvidia0 ] || command -v nvidia-smi >/dev/null 2>&1; then
-  echo "✅ GPU detected, starting vLLM with GPU support..."
-  docker run -d \
-    --name vllm-worker \
-    --gpus all \
-    -p 8000:8000 \
-    --env VLLM_USAGE=90% \
-    vllm/vllm-openai:latest \
-    --model ${huggingface_model} \
-    --port 8000 \
-    --max-model-len 4096 \
-    --s3-model-path ${model_s3_path}
-else
-  echo "⚠️  No GPU detected, starting vLLM in CPU mode (will be slow)..."
-  docker run -d \
-    --name vllm-worker \
-    -p 8000:8000 \
-    vllm/vllm-openai:latest \
-    --model ${huggingface_model} \
-    --port 8000 \
-    --max-model-len 2048
-fi
-
-echo ""
-echo "🎉 vLLM container started on port 8000"
-
 echo ""
 echo "=== Synkti Worker Setup Complete ==="
+echo "Synkti orchestrator will manage vLLM container automatically"
+echo ""
 echo "Service status:"
 systemctl status synkti.service --no-pager || true
 echo ""
