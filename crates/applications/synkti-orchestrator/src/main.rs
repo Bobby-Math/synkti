@@ -694,7 +694,27 @@ async fn handle_worker(
                 ("Project".to_string(), project.clone()),
             ];
 
-            let mut instance = spec.launch(&ec2_client, tags).await?;
+            let mut instance = match spec.launch(&ec2_client, tags).await {
+                Ok(i) => i,
+                Err(e) if e.to_string().contains("MaxSpotInstanceCountExceeded") => {
+                    error!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    error!("🚫 SPOT QUOTA EXCEEDED");
+                    error!("");
+                    error!("Your AWS account has reached the spot instance quota limit.");
+                    error!("Current quota: 8 vCPUs | Requested: Launching new instance");
+                    error!("");
+                    error!("To resolve this:");
+                    error!("  1. Wait for existing spot instances to terminate");
+                    error!("  2. Request quota increase from AWS Support");
+                    error!("  3. Try a different instance family (p3, g5g, g6) or region");
+                    error!("");
+                    error!("Run: synkti worker list --project-name {}", project);
+                    error!("     to see currently running instances.");
+                    error!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    return Err(e.into());
+                }
+                Err(e) => return Err(e.into()),
+            };
             info!("✅ Instance launched: {}", instance.id);
 
             // Wait for running if requested
@@ -1225,8 +1245,9 @@ async fn run_orchestrator(
     // Get the shared candidates list from discovery
     let candidates = peer_discovery.peers_ref();
 
-    // Model configuration
-    let model = "Qwen/Qwen2.5-7B-Instruct".to_string();
+    // Model configuration - REQUIRED: S3-downloaded models only (no external dependencies)
+    let model = std::env::var("MODEL_LOCAL_PATH")
+        .expect("MODEL_LOCAL_PATH must be set - models must be downloaded from S3, no HuggingFace fallback");
     let model_s3 = Some(format!("s3://{}/qwen2.5-7b/", models_bucket));
 
     // vLLM configuration

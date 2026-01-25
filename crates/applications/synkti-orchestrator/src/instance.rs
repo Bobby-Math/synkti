@@ -105,7 +105,7 @@ fn default_instance_type() -> String {
 }
 
 fn default_root_volume_size() -> i32 {
-    100 // 100GB default for ML workloads (Docker images + models)
+    200 // 200GB default for ML workloads (14GB model + Docker images + OS + overhead)
 }
 
 impl Default for InstanceSpec {
