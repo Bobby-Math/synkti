@@ -15,7 +15,7 @@ use plotly::{
     layout::{Axis, Layout},
     Plot, Scatter,
 };
-use synkti_simulation_engine::spot_data::SpotPriceGenerator;
+use synkti_simulation::spot_data::SpotPriceGenerator;
 
 fn main() {
     println!("🎨 Generating spot instance behavior visualization...");

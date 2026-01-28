@@ -6,7 +6,7 @@ use clap::Parser;
 use serde_json;
 use std::fs;
 
-use synkti_simulation_engine::{
+use synkti_simulation::{
     policies::{GreedyPolicy, OnDemandFallbackPolicy, OnDemandOnlyPolicy},
     simulator::Simulator,
     spot_data::SpotPriceGenerator,
@@ -105,7 +105,7 @@ fn main() {
             (*policy_name, true)
         };
 
-        let policy_box: Box<dyn synkti_simulation_engine::policies::SchedulingPolicy> = match base_policy {
+        let policy_box: Box<dyn synkti_simulation::policies::SchedulingPolicy> = match base_policy {
             "greedy" => Box::new(GreedyPolicy::new()),
             "fallback" => Box::new(OnDemandFallbackPolicy::new(2)), // Fallback after 2 preemptions
             "ondemand" => Box::new(OnDemandOnlyPolicy::new()),
