@@ -1,38 +1,49 @@
 [workspace]
-resolver = "3"
+resolver = "2"
 members = [
-
-# ===== PHASE 1: Grant Preparation (Active) =====
-"applications/synkti-simulation-engine",
-
-# ===== PHASE 2: AWS Orchestrator (Active Development) =====
-"applications/synkti-orchestrator",
-
-# ===== PHASE 2+: Production Components (Excluded - dependencies not ready) =====
-# NOTE: These crates require axon/synapse GPU features not yet implemented
-# Uncomment after completing Synapse Phase 2 (CUDA) and Axon implementation
-
-# "core/synkti-core",
-# "logic/synkti-scheduler",
-# "logic/synkti-greedy-scheduler",
-# "executors/synkti-ml-executor", # Requires axon + synapse GPU
-# "interfaces/cloud/cloud-traits",
-# "interfaces/cloud/aws-provider",
-# "interfaces/cloud/gcp-provider",
-# "interfaces/compute/compute-traits",
-# "interfaces/compute/rust-kernels",
-# "nodes/synkti-worker",
-# "nodes/spot-sentinel",
-# "applications/synkti-visualizer",
-
+    "synkti-agent",
+    "synkti-cli",
+    "synkti-core",
+    "synkti-simulation",
 ]
 
-[workspace.dependencies]
-# External consulting portfolio libraries (public AGPL-3.0, separate repos)
-synapse = { path = "../../synapse" }
-axon = { path = "../../axon" }
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0"
+repository = "https://github.com/bobby-math/synkti"
 
-# Common workspace dependencies
-tokio = { version = "1.0", features = ["full"] }
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.42", features = ["full"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Serialization
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Logging
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID
+uuid = { version = "1.11", features = ["v4"] }
+
+# Async
+futures = "0.3"
+async-stream = "0.3"
+
+# Async trait
+async-trait = "0.1"

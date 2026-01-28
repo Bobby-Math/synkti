@@ -1,0 +1,36 @@
+[[bin]]
+name = "synkti"
+path = "src/main.rs"
+
+[package]
+name = "synkti-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Synkti CLI - thin client for fleet management"
+
+[dependencies]
+synkti-core = { path = "../synkti-core" }
+
+# Async runtime
+tokio = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# HTTP client
+reqwest = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# CLI
+clap = { workspace = true }
+
+# Time
+chrono = { workspace = true }
