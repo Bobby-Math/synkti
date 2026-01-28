@@ -37,6 +37,7 @@ pub enum InstanceState {
     Terminated,
     Stopping,
     Stopped,
+    Unknown,
 }
 
 /// Provider type
