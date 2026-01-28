@@ -24,7 +24,7 @@
 //! AWS provides a 120-second grace period between the notice and actual termination.
 //! This is our window to checkpoint and migrate.
 
-use crate::error::{OrchestratorError, Result};
+use crate::error::{AgentError as OrchestratorError, Result};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::pin::Pin;

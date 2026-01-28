@@ -7,9 +7,11 @@
 //!
 //! This module manages the drain phase of stateless failover.
 
-use crate::elb::LoadBalancerManager;
 use crate::error::Result;
 use crate::vllm::VllmClient;
+
+// Note: ELB integration (LoadBalancerManager) is in synkti-providers (private).
+// The public agent handles local drain only. Fleet coordinates ELB operations.
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -102,33 +104,8 @@ impl DrainManager {
         Ok(())
     }
 
-    /// Signal that an instance is entering drain mode (with load balancer)
-    ///
-    /// This version takes a LoadBalancerManager to deregister from the target group.
-    pub async fn set_draining_with_elb(
-        &self,
-        instance_id: &str,
-        elb_manager: &LoadBalancerManager,
-    ) -> Result<()> {
-        info!(
-            instance_id = %instance_id,
-            "Marking instance as draining - no new requests will be accepted"
-        );
-
-        if let Some(ref config) = self.elb_config {
-            info!(
-                target_group = %config.target_group_arn,
-                "Deregistering instance from load balancer target group"
-            );
-            elb_manager
-                .deregister_target(&config.target_group_arn, instance_id, config.port)
-                .await?;
-        } else {
-            debug!("No ELB config, skipping load balancer deregistration");
-        }
-
-        Ok(())
-    }
+    // Note: ELB drain functions (set_draining_with_elb, drain_with_elb) are in synkti-fleet.
+    // The public agent handles local container draining only.
 
     /// Wait for in-flight requests to complete
     ///
@@ -290,59 +267,6 @@ impl DrainManager {
         Ok(result)
     }
 
-    /// Perform full drain sequence with load balancer integration
-    ///
-    /// This version deregisters from the load balancer and waits for
-    /// both LB draining and in-flight requests to complete.
-    pub async fn drain_with_elb(
-        &self,
-        instance_id: &str,
-        vllm_client: &VllmClient,
-        elb_manager: &LoadBalancerManager,
-    ) -> Result<DrainResult> {
-        let start = Instant::now();
-
-        // Step 1: Deregister from load balancer (if configured)
-        self.set_draining_with_elb(instance_id, elb_manager).await?;
-
-        // Step 2: Wait for in-flight requests to complete
-        // Also wait for LB connection draining in parallel
-        let vllm_future = self.wait_for_inflight(vllm_client, self.drain_timeout);
-
-        let elb_future = async {
-            if let Some(ref config) = self.elb_config {
-                // Wait for LB draining to complete (use same timeout)
-                let _ = elb_manager
-                    .wait_for_drained(
-                        &config.target_group_arn,
-                        instance_id,
-                        config.port,
-                        self.drain_timeout,
-                    )
-                    .await;
-            }
-        };
-
-        // Wait for both vLLM drain and ELB drain
-        let (status, _) = tokio::join!(vllm_future, elb_future);
-        let status = status?;
-
-        let drain_time = start.elapsed();
-
-        let result = DrainResult {
-            status,
-            drain_time_secs: drain_time.as_secs_f64(),
-            instance_id: instance_id.to_string(),
-        };
-
-        info!(
-            status = ?result.status,
-            drain_time_secs = result.drain_time_secs,
-            "Drain sequence with ELB completed"
-        );
-
-        Ok(result)
-    }
 
     /// Get the configured drain timeout
     pub fn drain_timeout(&self) -> Duration {

@@ -13,6 +13,7 @@ use std::time::Duration;
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+mod error;
 mod monitor;
 mod vllm;
 mod drain;

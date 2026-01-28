@@ -2,7 +2,7 @@
 //!
 //! Manages vLLM Docker containers for ML inference.
 
-use crate::error::{OrchestratorError, Result};
+use crate::error::{AgentError as OrchestratorError, Result};
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 use tokio::process::Command as AsyncCommand;
